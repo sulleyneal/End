@@ -88,16 +88,16 @@ const DONE = [
   "Session recaps written to a campaign journal, aware of what happened in combat",
   "Levelling from XP: hit points, hit dice and spell slots at the new level",
   "Grid battle map with tap-to-move over server-validated movement",
+  "Animated 3D dice that replay the roll the server already made",
+  "Uploadable character portraits, resized in the browser and stored in Postgres",
   "AI DM over tool-use intents — it cannot express a number that matters",
   "Table chat between the players — instant, free, and invisible to the DM",
   "Play screen, character builder, dice audit log",
 ];
 
 const NEXT = [
-  "3D dice tray replaying the server's roll",
   "Short and long rest UI (the engine is done and tested)",
   "Async turns with a what-you-missed recap for the player who was away",
-  "Uploadable character portraits",
   "Rogue Expertise and Sneak Attack, Monk Martial Arts",
   "Choosing new spells on level-up — slots grow, the spell list does not",
   "Ranged attacks in melee do not yet take disadvantage",

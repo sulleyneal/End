@@ -12,6 +12,7 @@ import { CombatPanel } from "@/components/CombatPanel";
 import { BattleMap } from "@/components/BattleMap";
 import { Journal } from "@/components/Journal";
 import { ChatPanel, type ChatMessage } from "@/components/ChatPanel";
+import { DiceTray } from "@/components/DiceTray";
 import type { Encounter } from "@/components/combat-types";
 
 type Roll = {
@@ -66,6 +67,7 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
     "story" | "combat" | "chat" | "party" | "dice" | "journal"
   >("story");
   const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [tray, setTray] = useState<Roll | null>(null);
   const [unreadChat, setUnreadChat] = useState(0);
   const bottom = useRef<HTMLDivElement>(null);
   const seen = useRef(new Set<string>());
@@ -75,7 +77,15 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
     try {
       const next = await api<State>(`/api/campaigns/${campaignId}/state`);
       setState((prev) => (prev ? { ...prev, characters: next.characters, encounter: next.encounter } : next));
-      setRolls(next.rolls);
+      setRolls((prev) => {
+        // Animate whatever is new since the last refresh. The faces were rolled
+        // and persisted server-side; the tray only replays them.
+        const known = new Set(prev.map((r) => r.id));
+        const fresh = next.rolls.filter((r) => !known.has(r.id) && r.dice.length > 0);
+        const latest = fresh[fresh.length - 1];
+        if (latest && prev.length > 0) setTray(latest);
+        return next.rolls;
+      });
     } catch {
       // A failed side-refresh should not disturb the story log.
     }
@@ -258,6 +268,15 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
           </button>
         ))}
       </nav>
+
+      {tray && (
+        <DiceTray
+          dice={tray.dice}
+          total={tray.total}
+          label={tray.actorName}
+          onDone={() => setTray(null)}
+        />
+      )}
 
       <div className="grid flex-1 gap-4 lg:grid-cols-[1fr_20rem]">
         <section className={`flex min-h-0 flex-col ${tab === "story" ? "" : "hidden lg:flex"}`}>

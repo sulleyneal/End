@@ -1,5 +1,7 @@
 "use client";
 
+import { PortraitUpload } from "@/components/PortraitUpload";
+
 type Sheet = {
   id: string;
   name: string;
@@ -9,6 +11,7 @@ type Sheet = {
   hpMax: number;
   tempHp: number;
   conditions: string[];
+  hasPortrait?: boolean;
   labels: { race: string; class: string; subrace: string | null };
   derived: {
     armorClass: { value: number };
@@ -32,8 +35,29 @@ export function PartyPanel({ characters, meId }: { characters: Sheet[]; meId: st
           {characters.map((c) => {
             const pct = Math.max(0, Math.min(100, (c.hpCurrent / Math.max(1, c.hpMax)) * 100));
             const bar = pct > 50 ? "var(--success)" : pct > 20 ? "var(--ruling)" : "var(--danger)";
+            const isMine = c.userId === meId;
             return (
               <li key={c.id}>
+                {isMine ? (
+                  <div className="mb-2">
+                    <PortraitUpload
+                      characterId={c.id}
+                      name={c.name}
+                      hasPortrait={c.hasPortrait ?? false}
+                    />
+                  </div>
+                ) : (
+                  c.hasPortrait && (
+                    <div className="mb-2 flex items-center gap-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`/api/characters/${c.id}/portrait`}
+                        alt={`${c.name}'s portrait`}
+                        className="h-12 w-12 rounded-full border border-[var(--border)] object-cover"
+                      />
+                    </div>
+                  )
+                )}
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="font-medium">
                     {c.name}

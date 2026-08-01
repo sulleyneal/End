@@ -47,6 +47,7 @@ export type CharacterSheet = {
   inspiration: boolean;
   notes: string | null;
   /** Display names resolved from the SRD so the client never has to look them up. */
+  hasPortrait: boolean;
   labels: { race: string; class: string; subrace: string | null };
   slots: { level: number; max: number; used: number }[];
   spells: { spellIndex: string; prepared: boolean; alwaysPrepared: boolean }[];
@@ -235,6 +236,9 @@ export async function getCharacterSheet(characterId: string): Promise<CharacterS
     exhaustion: row.exhaustion,
     inspiration: row.inspiration,
     notes: row.notes,
+    // The bytes stay on the server; the client fetches them from the portrait
+    // route, so a party list never carries megabytes of images in its JSON.
+    hasPortrait: row.portrait !== null,
     labels: {
       race: raceDoc.name,
       class: classDoc.name,
