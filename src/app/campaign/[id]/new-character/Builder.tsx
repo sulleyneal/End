@@ -33,6 +33,13 @@ type Options = {
     hitDie: number;
     savingThrows: string[];
     spellcastingAbility: string | null;
+    spells: {
+      cantripsKnown: number;
+      spellsKnown: number | null;
+      prepares: boolean;
+      cantrips: { index: string; name: string; school: string }[];
+      level1: { index: string; name: string; school: string; concentration: boolean }[];
+    } | null;
     skills: { choose: number; options: string[] } | null;
     equipment: {
       block: number;
@@ -72,6 +79,8 @@ export default function Builder({ campaignId }: { campaignId: string }) {
   const [skillChoices, setSkillChoices] = useState<string[]>([]);
   const [racePicks, setRacePicks] = useState<string[]>([]);
   const [equipment, setEquipment] = useState<Record<number, { option: number; picks: string[] }>>({});
+  const [cantripPicks, setCantripPicks] = useState<string[]>([]);
+  const [spellPicks, setSpellPicks] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -93,6 +102,8 @@ export default function Builder({ campaignId }: { campaignId: string }) {
   if (lastClass !== classIndex) {
     setLastClass(classIndex);
     setSkillChoices([]);
+    setCantripPicks([]);
+    setSpellPicks([]);
     const defaults: Record<number, { option: number; picks: string[] }> = {};
     for (const block of classDoc?.equipment ?? []) {
       defaults[block.block] = {
@@ -131,12 +142,30 @@ export default function Builder({ campaignId }: { campaignId: string }) {
     return used.join(",") === [...STANDARD_ARRAY].join(",");
   }, [assignment]);
 
+  // Prepared casters get modifier + level, so this moves as the player
+  // reassigns ability scores. Known casters take the flat SRD number.
+  const casting = classDoc?.spells ?? null;
+  const castingAbility = classDoc?.spellcastingAbility as Ability | undefined;
+  const castingMod = (() => {
+    if (!castingAbility) return 0;
+    const racial = (raceDoc?.abilityBonuses ?? [])
+      .filter((b) => b.ability === castingAbility)
+      .reduce((sum, b) => sum + b.bonus, 0);
+    return Math.floor((assignment[castingAbility] + racial - 10) / 2);
+  })();
+  const cantripsNeeded = casting?.cantripsKnown ?? 0;
+  const spellsNeeded = casting
+    ? (casting.spellsKnown ?? (classIndex === "wizard" ? 6 : Math.max(1, castingMod + 1)))
+    : 0;
+
   const skillsNeeded = classDoc?.skills?.choose ?? 0;
   const raceNeeded = raceDoc?.proficiencyChoice?.choose ?? 0;
   const ready =
     name.trim().length > 0 &&
     arrayValid &&
     skillChoices.length === skillsNeeded &&
+    cantripPicks.length === cantripsNeeded &&
+    spellPicks.length === spellsNeeded &&
     racePicks.length === raceNeeded;
 
   const submit = async () => {
@@ -153,6 +182,8 @@ export default function Builder({ campaignId }: { campaignId: string }) {
           scores: assignment,
           scoreMethod: "standard-array",
           skillChoices,
+          cantripChoices: cantripsNeeded > 0 ? cantripPicks : undefined,
+          spellChoices: spellsNeeded > 0 ? spellPicks : undefined,
           raceProficiencyChoices: raceNeeded > 0 ? racePicks : undefined,
           equipmentSelections: Object.entries(equipment).map(([block, sel]) => ({
             block: Number(block),
@@ -326,6 +357,39 @@ export default function Builder({ campaignId }: { campaignId: string }) {
         </Card>
       )}
 
+      {casting && (cantripsNeeded > 0 || spellsNeeded > 0) && (
+        <Card className="grid gap-4">
+          <div>
+            <h2 className="font-semibold">Spells</h2>
+            <p className="text-sm text-[var(--muted)]">
+              {casting.prepares
+                ? "You prepare these each day and can swap them on a long rest."
+                : "These are the spells you know."}
+            </p>
+          </div>
+
+          {cantripsNeeded > 0 && (
+            <SpellPicker
+              title="Cantrips"
+              needed={cantripsNeeded}
+              picks={cantripPicks}
+              setPicks={setCantripPicks}
+              spells={casting.cantrips}
+            />
+          )}
+
+          {spellsNeeded > 0 && (
+            <SpellPicker
+              title={classIndex === "wizard" ? "Spellbook — level 1" : "Level 1 spells"}
+              needed={spellsNeeded}
+              picks={spellPicks}
+              setPicks={setSpellPicks}
+              spells={casting.level1}
+            />
+          )}
+        </Card>
+      )}
+
       {raceDoc?.proficiencyChoice && (
         <Card className="grid gap-3">
           <h2 className="font-semibold">
@@ -428,5 +492,64 @@ export default function Builder({ campaignId }: { campaignId: string }) {
         {busy ? "Creating…" : "Create character"}
       </Button>
     </main>
+  );
+}
+
+
+/** A count-limited chip list, shared by the cantrip and spell steps. */
+function SpellPicker({
+  title,
+  needed,
+  picks,
+  setPicks,
+  spells,
+}: {
+  title: string;
+  needed: number;
+  picks: string[];
+  setPicks: (fn: (prev: string[]) => string[]) => void;
+  spells: { index: string; name: string; school: string; concentration?: boolean }[];
+}) {
+  const full = picks.length >= needed;
+  return (
+    <div className="grid gap-2">
+      <h3 className="text-sm font-medium">
+        {title} — choose {needed}
+        <span className="ml-2 font-normal text-[var(--muted)]">
+          {picks.length}/{needed}
+        </span>
+      </h3>
+      <div className="flex flex-wrap gap-2">
+        {spells.map((spell) => {
+          const chosen = picks.includes(spell.index);
+          return (
+            <button
+              key={spell.index}
+              type="button"
+              data-testid="spell-option"
+              disabled={!chosen && full}
+              title={spell.school}
+              onClick={() =>
+                setPicks((prev) =>
+                  chosen ? prev.filter((s) => s !== spell.index) : [...prev, spell.index],
+                )
+              }
+              className={`rounded-lg border px-3 py-1.5 text-sm transition disabled:opacity-30 ${
+                chosen
+                  ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                  : "border-[var(--border)]"
+              }`}
+            >
+              {spell.name}
+              {spell.concentration && (
+                <span className="ml-1.5 text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                  conc
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

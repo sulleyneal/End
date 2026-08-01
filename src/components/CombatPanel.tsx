@@ -28,6 +28,8 @@ const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
 
 export function CombatPanel({ encounter, myCharacterIds, canCommandAll, onChanged }: Props) {
   const [targetId, setTargetId] = useState<string | null>(null);
+  const [spellIndex, setSpellIndex] = useState<string>("");
+  const [slotLevel, setSlotLevel] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -160,6 +162,29 @@ export function CombatPanel({ encounter, myCharacterIds, canCommandAll, onChange
                 <p className="text-sm text-[var(--muted)]">
                   No weapon attacks. Describe what you do in the story box and the DM will
                   adjudicate it.
+                </p>
+              )}
+
+              {active.spellcasting && active.spellcasting.spells.length > 0 && (
+                <SpellCaster
+                  caster={active}
+                  target={chosenTarget}
+                  busy={busy}
+                  spellIndex={spellIndex}
+                  setSpellIndex={setSpellIndex}
+                  slotLevel={slotLevel}
+                  setSlotLevel={setSlotLevel}
+                  onCast={(body) => act(body)}
+                />
+              )}
+
+              {active.concentration && (
+                <p className="rounded-lg bg-[var(--surface-2)] px-3 py-2 text-xs text-[var(--muted)]">
+                  Concentrating on{" "}
+                  <strong className="text-[var(--foreground)]">
+                    {active.concentration.spellName}
+                  </strong>
+                  . Taking damage forces a Constitution save to hold it.
                 </p>
               )}
 
@@ -315,6 +340,105 @@ function DeathSavePrompt({
       <Button testId="death-save-button" disabled={busy} className="w-full" onClick={onRoll}>
         Roll death save
       </Button>
+    </div>
+  );
+}
+
+
+/**
+ * Spell casting.
+ *
+ * The slot menu offers only levels the caster actually has left, and cantrips
+ * are pinned to level 0 — but the server re-checks both, so a tampered client
+ * gains nothing by offering itself a slot it has already spent.
+ */
+function SpellCaster({
+  caster,
+  target,
+  busy,
+  spellIndex,
+  setSpellIndex,
+  slotLevel,
+  setSlotLevel,
+  onCast,
+}: {
+  caster: Combatant;
+  target: Combatant | null;
+  busy: boolean;
+  spellIndex: string;
+  setSpellIndex: (v: string) => void;
+  slotLevel: number | null;
+  setSlotLevel: (v: number | null) => void;
+  onCast: (body: Record<string, unknown>) => void;
+}) {
+  const casting = caster.spellcasting;
+  if (!casting) return null;
+
+  const spell = casting.spells.find((s) => s.index === spellIndex) ?? null;
+  const usable = casting.slots.filter((s) => s.used < s.max && (!spell || s.level >= spell.level));
+  const level = spell?.level === 0 ? 0 : (slotLevel ?? usable[0]?.level ?? null);
+  const castable = spell !== null && (spell.level === 0 || level !== null);
+
+  return (
+    <div data-testid="spellcaster" className="grid gap-2 rounded-lg border border-[var(--border)] p-3">
+      <div className="flex items-center justify-between text-xs text-[var(--muted)]">
+        <span>Spells · save DC {casting.saveDc}</span>
+        <span className="tabular">
+          {casting.slots.map((s) => `L${s.level} ${s.max - s.used}/${s.max}`).join(" · ") ||
+            "cantrips only"}
+        </span>
+      </div>
+
+      <select
+        data-testid="spell-picker"
+        className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm"
+        value={spellIndex}
+        onChange={(e) => {
+          setSpellIndex(e.target.value);
+          setSlotLevel(null);
+        }}
+      >
+        <option value="">Choose a spell…</option>
+        {casting.spells.map((s) => (
+          <option key={s.index} value={s.index}>
+            {s.name} {s.level === 0 ? "(cantrip)" : `(level ${s.level})`}
+          </option>
+        ))}
+      </select>
+
+      {spell && spell.level > 0 && (
+        <select
+          data-testid="slot-picker"
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm"
+          value={level ?? ""}
+          onChange={(e) => setSlotLevel(Number(e.target.value))}
+        >
+          {usable.length === 0 && <option value="">No slots left</option>}
+          {usable.map((s) => (
+            <option key={s.level} value={s.level}>
+              Level {s.level} slot ({s.max - s.used} left)
+            </option>
+          ))}
+        </select>
+      )}
+
+      <button
+        data-testid="cast-button"
+        disabled={busy || !castable || caster.actionUsed}
+        onClick={() =>
+          onCast({
+            type: "cast",
+            combatantId: caster.id,
+            spellIndex,
+            slotLevel: spell?.level === 0 ? 0 : (level ?? 1),
+            targetIds: target ? [target.id] : [],
+          })
+        }
+        className="rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        Cast{spell ? ` ${spell.name}` : ""}
+        {target && spell ? ` at ${target.name}` : ""}
+      </button>
     </div>
   );
 }

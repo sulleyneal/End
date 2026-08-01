@@ -21,7 +21,7 @@ import { listCharacters } from "./characters";
 import { appendEvent } from "./events";
 import { NotFoundError, RuleError } from "./http";
 import { type CombatStats, monsterArmorClass, monsterCombatStats, monsterHitPoints } from "./monsters";
-import { type CastReport, castSpell } from "./casting";
+import { type CastReport, castSpell, knownSpells, slotsFor } from "./casting";
 
 /**
  * Encounter orchestration.
@@ -37,6 +37,13 @@ type CombatantRow = typeof combatants.$inferSelect;
 export type CombatantView = CombatantRow & {
   stats: CombatStats | null;
   attacks: DerivedAttack[];
+  /** Spell list and remaining slots, for a character who casts. */
+  spellcasting: {
+    saveDc: number;
+    attackBonus: number;
+    slots: { level: number; max: number; used: number }[];
+    spells: { index: string; name: string; level: number; concentration: boolean }[];
+  } | null;
 };
 
 export type MapView = {
@@ -302,7 +309,45 @@ export async function getEncounter(encounterId: string): Promise<EncounterView> 
     ...row,
     stats: row.stats as CombatStats | null,
     attacks: (row.stats as CombatStats | null)?.attacks ?? [],
+    spellcasting: null,
   }));
+
+  // Casters carry their spell list and remaining slots so the combat panel can
+  // offer them without a second round trip. Read live rather than snapshotted:
+  // a slot spent this turn must be gone from the next render.
+  const casterIds = view.filter((c) => c.characterId).map((c) => c.characterId!);
+  if (casterIds.length > 0) {
+    const sheets = await listCharacters(encounter.campaignId);
+    const spellDocs = srd.spells();
+
+    for (const combatant of view) {
+      if (!combatant.characterId) continue;
+      const sheet = sheets.find((s) => s.id === combatant.characterId);
+      if (!sheet?.derived.spellcasting) continue;
+
+      const [slots, known] = await Promise.all([
+        slotsFor(combatant.characterId),
+        knownSpells(combatant.characterId),
+      ]);
+
+      combatant.spellcasting = {
+        saveDc: sheet.derived.spellcasting.saveDc,
+        attackBonus: sheet.derived.spellcasting.attackBonus,
+        slots,
+        spells: known
+          .filter((k) => k.prepared)
+          .map((k) => spellDocs.find((d) => d.index === k.spellIndex))
+          .filter((d): d is NonNullable<typeof d> => Boolean(d))
+          .map((d) => ({
+            index: d.index,
+            name: d.name,
+            level: d.level,
+            concentration: d.concentration,
+          }))
+          .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)),
+      };
+    }
+  }
 
   const living = view.filter((c) => !c.defeated);
   const active =

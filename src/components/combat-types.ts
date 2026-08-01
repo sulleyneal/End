@@ -37,6 +37,14 @@ export type Combatant = {
   x: number | null;
   y: number | null;
   attacks: Attack[];
+  /** Present only for a spellcaster whose turn this could be. */
+  spellcasting: {
+    saveDc: number;
+    attackBonus: number;
+    slots: { level: number; max: number; used: number }[];
+    spells: { index: string; name: string; level: number; concentration: boolean }[];
+  } | null;
+  concentration: { spellIndex: string; spellName: string; level: number } | null;
 };
 
 export type MapShape = {
