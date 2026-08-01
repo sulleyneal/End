@@ -12,6 +12,7 @@ import type {
   SrdSkill,
   SrdSpell,
   SrdSubrace,
+  SrdTrait,
 } from "./types";
 
 /**
@@ -46,6 +47,7 @@ export const srd = {
   spells: () => load<SrdSpell>("5e-SRD-Spells"),
   monsters: () => load<SrdMonster>("5e-SRD-Monsters"),
   conditions: () => load<SrdCondition>("5e-SRD-Conditions"),
+  traits: () => load<SrdTrait>("5e-SRD-Traits"),
 };
 
 const byIndex = <T extends { index: string }>(docs: T[], index: string): T => {
@@ -58,6 +60,7 @@ export const srdGet = {
   class: (index: string) => byIndex(srd.classes(), index),
   race: (index: string) => byIndex(srd.races(), index),
   subrace: (index: string) => byIndex(srd.subraces(), index),
+  trait: (index: string) => byIndex(srd.traits(), index),
   equipment: (index: string) => byIndex(srd.equipment(), index),
   spell: (index: string) => byIndex(srd.spells(), index),
   monster: (index: string) => byIndex(srd.monsters(), index),

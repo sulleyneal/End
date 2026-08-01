@@ -58,12 +58,24 @@ export type SrdEquipmentCategory = {
   equipment: SrdRef[];
 };
 
+export type SrdTrait = {
+  index: string;
+  name: string;
+  desc?: string[];
+  races?: SrdRef[];
+  subraces?: SrdRef[];
+  /** Proficiencies the trait grants outright, e.g. Keen Senses -> Perception. */
+  proficiencies?: SrdRef[];
+  proficiency_choices?: SrdChoice;
+};
+
 export type SrdRace = {
   index: string;
   name: string;
   speed: number;
   size: string;
   ability_bonuses: { ability_score: SrdRef; bonus: number }[];
+  ability_bonus_options?: SrdChoice;
   starting_proficiencies?: SrdRef[];
   starting_proficiency_options?: SrdChoice;
   languages?: SrdRef[];
@@ -76,6 +88,7 @@ export type SrdSubrace = {
   name: string;
   race: SrdRef;
   ability_bonuses: { ability_score: SrdRef; bonus: number }[];
+  ability_bonus_options?: SrdChoice;
   starting_proficiencies?: SrdRef[];
   racial_traits?: SrdRef[];
 };

@@ -9,9 +9,11 @@ import {
   type SrdOption,
   type SrdRace,
   type SrdSubrace,
+  type SrdTrait,
 } from "@/srd/types";
 import { abilityModifier } from "./character";
 import { type EquipmentSelection, resolveStartingEquipment } from "./equipment";
+import { resolveTraits } from "./traits";
 
 /**
  * Legal character construction.
@@ -176,6 +178,8 @@ export type BuildContext = {
   levelDoc?: SrdLevel | null;
   /** Needed to resolve "a martial weapon" style equipment choices. */
   equipmentCategories?: Pick<SrdEquipmentCategory, "index" | "equipment">[];
+  /** Racial trait documents, the source of trait-granted proficiencies. */
+  traitDocs?: SrdTrait[];
   /** Armour lookup, so the starting kit can be worn rather than carried. */
   equipmentDocs?: Pick<
     SrdEquipment,
@@ -239,6 +243,13 @@ export function buildLevel1Character(
     throw new BuildError(`${ctx.raceDoc.name} does not choose extra proficiencies.`);
   }
 
+  // Trait-granted proficiencies: Keen Senses, Dwarven Combat Training, Elf
+  // Weapon Training and friends. These are listed in the SRD trait documents,
+  // so nothing is transcribed — without this a high elf reaches the table
+  // without Perception and a dwarf without their weapon training.
+  const traits = resolveTraits(ctx.raceDoc, ctx.subraceDoc, ctx.traitDocs ?? []);
+  for (const prof of traits.proficiencies) add(prof, "race-trait");
+
   // Racial bonuses are applied by deriveCharacter, but HP needs the final Con now.
   let conBonus = 0;
   for (const bonus of ctx.raceDoc.ability_bonuses ?? []) {
@@ -250,7 +261,7 @@ export function buildLevel1Character(
   const conMod = abilityModifier(request.scores.con + conBonus);
 
   // Level 1 HP is the maximum hit die plus the Constitution modifier (PHB 12).
-  const hpMax = Math.max(1, ctx.classDoc.hit_die + conMod);
+  const hpMax = Math.max(1, ctx.classDoc.hit_die + conMod + traits.hpPerLevel);
 
   // Starting kit: the class's fixed items plus one resolved branch per choice
   // block. Armour and shields come out worn, and the character draws one melee

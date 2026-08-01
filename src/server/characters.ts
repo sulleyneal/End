@@ -73,6 +73,7 @@ export async function createCharacter(params: {
     levelDoc,
     equipmentCategories: srd.equipmentCategories(),
     equipmentDocs: srd.equipment(),
+    traitDocs: srd.traits(),
   });
 
   const [row] = await db
@@ -179,6 +180,7 @@ export async function getCharacterSheet(characterId: string): Promise<CharacterS
       levelDoc,
       skills: srd.skills(),
       proficiencyDocs: srd.proficiencies(),
+      traitDocs: srd.traits(),
       proficiencies: profRows.map((p) => ({
         kind: p.kind,
         proficiencyIndex: p.proficiencyIndex,

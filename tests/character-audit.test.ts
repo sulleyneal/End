@@ -8,6 +8,7 @@ import {
 } from "@/rules/character";
 import { buildLevel1Character, skillOptionsFor } from "@/rules/build";
 import { equipmentChoicesFor } from "@/rules/equipment";
+import { resolveTraits } from "@/rules/traits";
 import { srd, srdGet } from "@/srd/local";
 import { ABILITIES, type AbilityKey } from "@/srd/types";
 
@@ -193,6 +194,7 @@ function contextFor(
 ): DeriveContext {
   const classDoc = srdGet.class(classIndex);
   return {
+    traitDocs: srd.traits(),
     classDoc,
     raceDoc: srdGet.race(raceIndex),
     subraceDoc: options.subraceIndex ? srdGet.subrace(options.subraceIndex) : null,
@@ -688,5 +690,73 @@ describe("level-1 construction", () => {
         { classDoc: srdGet.class("fighter"), raceDoc: srdGet.race("human") },
       ),
     ).toThrow(/no subrace/i);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Racial traits
+ *
+ * Every case below was a real miss found by an adversarial playthrough:
+ * traits were parsed from the SRD by nobody, so hill dwarves were short on
+ * hit points, high elves had no Perception and one cantrip too few, and
+ * tieflings burned like anyone else.
+ * ------------------------------------------------------------------ */
+
+describe("racial traits reach the sheet", () => {
+  it("Dwarven Toughness adds 1 HP per level, not once", () => {
+    const plain = deriveCharacter(
+      characterAt("fighter", "dwarf", 5),
+      contextFor("fighter", "dwarf", 5),
+    );
+    const hill = deriveCharacter(
+      characterAt("fighter", "dwarf", 5),
+      contextFor("fighter", "dwarf", 5, { subraceIndex: "hill-dwarf" }),
+    );
+    expect(hill.hpMaxByAverage - plain.hpMaxByAverage).toBe(5);
+  });
+
+  it("Keen Senses gives an elf Perception proficiency and passive 12", () => {
+    const derived = deriveCharacter(
+      characterAt("wizard", "elf", 1),
+      contextFor("wizard", "elf", 1, { subraceIndex: "high-elf" }),
+    );
+    // Wis 10 (+0) + proficiency 2 = +2, passive 10 + 2 = 12.
+    expect(derived.skills.perception.proficient).toBe(true);
+    expect(derived.skills.perception.modifier).toBe(2);
+    expect(derived.passive.perception).toBe(12);
+  });
+
+  it("High Elf Cantrip adds a fourth cantrip to a level-1 wizard", () => {
+    const highElf = deriveCharacter(
+      characterAt("wizard", "elf", 1),
+      contextFor("wizard", "elf", 1, { subraceIndex: "high-elf" }),
+    );
+    const human = deriveCharacter(
+      characterAt("wizard", "human", 1),
+      contextFor("wizard", "human", 1),
+    );
+    expect(human.spellcasting?.cantripsKnown).toBe(3);
+    expect(highElf.spellcasting?.cantripsKnown).toBe(4);
+  });
+
+  it("Elf Weapon Training and Dwarven Combat Training grant weapon proficiencies", () => {
+    const built = resolveTraits(srdGet.race("elf"), srdGet.subrace("high-elf"), srd.traits());
+    expect(built.proficiencies).toContain("skill-perception");
+    expect(built.proficiencies).toEqual(
+      expect.arrayContaining(["longswords", "shortswords", "shortbows", "longbows"]),
+    );
+
+    const dwarf = resolveTraits(srdGet.race("dwarf"), null, srd.traits());
+    expect(dwarf.proficiencies).toEqual(
+      expect.arrayContaining(["battleaxes", "handaxes", "light-hammers", "warhammers"]),
+    );
+  });
+
+  it("Hellish Resistance makes a tiefling resistant to fire", () => {
+    const tiefling = resolveTraits(srdGet.race("tiefling"), null, srd.traits());
+    expect(tiefling.resistances).toContain("fire");
+
+    const human = resolveTraits(srdGet.race("human"), null, srd.traits());
+    expect(human.resistances).toEqual([]);
   });
 });

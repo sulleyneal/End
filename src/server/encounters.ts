@@ -193,7 +193,9 @@ export async function startEncounter(
           Object.entries(sheet.derived.saves).map(([k, v]) => [k, v.modifier]),
         ),
         attacks: sheet.derived.attacks,
-        resistances: [],
+        // Racial resistances travel with the character into the fight; without
+        // this a tiefling takes full fire damage despite Hellish Resistance.
+        resistances: sheet.derived.resistances,
         immunities: [],
         vulnerabilities: [],
         conditionImmunities: [],

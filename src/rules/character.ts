@@ -8,6 +8,7 @@ import {
   type SrdRace,
   type SrdSkill,
   type SrdSubrace,
+  type SrdTrait,
 } from "@/srd/types";
 import {
   abilityCheckModifiers,
@@ -15,6 +16,7 @@ import {
   exhaustionEffects,
   maxHpAfterExhaustion,
 } from "./conditions";
+import { resolveTraits } from "./traits";
 
 /**
  * `deriveCharacter` is the single source of truth for every number on a
@@ -78,6 +80,8 @@ export type DeriveContext = {
   proficiencyDocs: SrdProficiency[];
   proficiencies: CharacterProficiencyRow[];
   items: CharacterItemRow[];
+  /** Racial trait documents; supply bonus HP, resistances and extra cantrips. */
+  traitDocs?: SrdTrait[];
 };
 
 export type DerivedAbility = {
@@ -134,6 +138,8 @@ export type DerivedCharacter = {
   spellcasting: DerivedSpellcasting | null;
   attacks: DerivedAttack[];
   carry: { capacity: number; pushDragLift: number; encumbered: number; heavilyEncumbered: number };
+  /** Damage types this character resists, e.g. a tiefling's Hellish Resistance. */
+  resistances: string[];
   /** True when wearing armor or a shield the character is not proficient with. */
   armorPenalty: boolean;
   stealthDisadvantage: boolean;
@@ -205,12 +211,20 @@ export function deriveCharacter(
   }
   const mod = (key: AbilityKey) => abilities[key].modifier;
 
+  const traits = resolveTraits(ctx.raceDoc, ctx.subraceDoc, ctx.traitDocs ?? []);
+
   /* --- Proficiency bonus: SRD level data first, formula as the fallback --- */
   const proficiencyBonus =
     ctx.levelDoc?.prof_bonus ?? proficiencyBonusForLevel(character.level);
 
   /* --- Proficiency lookup helpers --- */
-  const profIndexes = new Set(ctx.proficiencies.map((p) => p.proficiencyIndex));
+  // Trait proficiencies are folded in here rather than trusted to have been
+  // stored at build time, so a character created before traits were understood
+  // still derives a correct sheet instead of needing a data migration.
+  const profIndexes = new Set([
+    ...ctx.proficiencies.map((p) => p.proficiencyIndex),
+    ...traits.proficiencies,
+  ]);
   const expertise = new Set(
     ctx.proficiencies.filter((p) => p.expertise).map((p) => p.proficiencyIndex),
   );
@@ -337,7 +351,7 @@ export function deriveCharacter(
       modifier: mod(ability),
       saveDc: 8 + proficiencyBonus + mod(ability),
       attackBonus: proficiencyBonus + mod(ability),
-      cantripsKnown: casting?.cantrips_known ?? 0,
+      cantripsKnown: (casting?.cantrips_known ?? 0) + traits.extraCantrips,
       spellsKnown: casting?.spells_known,
       slots,
     };
@@ -384,11 +398,15 @@ export function deriveCharacter(
   const hitDie = ctx.classDoc.hit_die;
   const averagePerLevel = Math.floor(hitDie / 2) + 1;
   const hpMaxByAverage =
-    hitDie + mod("con") + (character.level - 1) * (averagePerLevel + mod("con"));
+    hitDie +
+    mod("con") +
+    (character.level - 1) * (averagePerLevel + mod("con")) +
+    traits.hpPerLevel * character.level;
 
   const strScore = abilities.str.score;
 
   return {
+    resistances: traits.resistances,
     abilities,
     proficiencyBonus,
     armorClass: { value: ac, sources: acSources },
