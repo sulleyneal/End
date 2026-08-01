@@ -7,11 +7,16 @@ import type { SrdRace, SrdSubrace, SrdTrait } from "@/srd/types";
  * Senses lists `skill-perception`, Dwarven Combat Training lists four weapon
  * proficiencies. Those are read straight out of the data and never transcribed.
  *
- * A few traits carry their mechanics only in English prose — "your hit point
- * maximum increases by 1" — with nothing structured to read. For those, and
- * only those, the *numbers* live in TRAIT_MECHANICS below while the descriptive
- * text still comes from the SRD file. This is the same split the conditions
- * module makes.
+ * Two traits carry their mechanics only in English prose — "your hit point
+ * maximum increases by 1", "you have resistance to fire damage" — with nothing
+ * structured to read. For those two, and only those, the *numbers* live in
+ * TRAIT_MECHANICS below while the descriptive text still comes from the SRD
+ * file. This is the same split the conditions module makes.
+ *
+ * High Elf Cantrip is deliberately not among them: its count and its eight
+ * allowed spells are both in `trait_specific.spell_options`, so transcribing
+ * "one extra cantrip" was both unnecessary and wrong — it let a cleric take a
+ * fourth cleric cantrip instead of the wizard cantrip the trait grants.
  */
 
 export type TraitMechanics = {
@@ -19,10 +24,6 @@ export type TraitMechanics = {
   hpPerLevel?: number;
   /** Damage types this trait grants resistance to (Hellish Resistance). */
   resistances?: string[];
-  /** Extra cantrips known (High Elf Cantrip). */
-  extraCantrips?: number;
-  /** Reroll a natural 1 on attacks, checks and saves (Halfling Lucky). */
-  luckyRerollOnes?: boolean;
 };
 
 /**
@@ -32,8 +33,6 @@ export type TraitMechanics = {
 export const TRAIT_MECHANICS: Record<string, TraitMechanics> = {
   "dwarven-toughness": { hpPerLevel: 1 },
   "hellish-resistance": { resistances: ["fire"] },
-  "high-elf-cantrip": { extraCantrips: 1 },
-  lucky: { luckyRerollOnes: true },
 };
 
 /** Every trait index a character has, from its race and its subrace. */
@@ -52,8 +51,12 @@ export type ResolvedTraits = {
   proficiencies: string[];
   hpPerLevel: number;
   resistances: string[];
-  extraCantrips: number;
-  luckyRerollOnes: boolean;
+  /**
+   * Extra spells a trait grants, with the exact list to choose from — High Elf
+   * Cantrip is `choose 1` from eight named wizard cantrips. Both the count and
+   * the list are structured in the trait document, so neither is transcribed.
+   */
+  spellChoices: { traitIndex: string; traitName: string; choose: number; options: string[] }[];
 };
 
 /**
@@ -73,8 +76,7 @@ export function resolveTraits(
     proficiencies: [],
     hpPerLevel: 0,
     resistances: [],
-    extraCantrips: 0,
-    luckyRerollOnes: false,
+    spellChoices: [],
   };
 
   for (const doc of docs) {
@@ -82,11 +84,25 @@ export function resolveTraits(
       if (!result.proficiencies.includes(prof.index)) result.proficiencies.push(prof.index);
     }
 
+    const spellOptions = doc.trait_specific?.spell_options;
+    if (spellOptions) {
+      const options: string[] = [];
+      for (const option of spellOptions.from.options ?? []) {
+        if (option.item) options.push(option.item.index);
+      }
+      if (options.length > 0) {
+        result.spellChoices.push({
+          traitIndex: doc.index,
+          traitName: doc.name,
+          choose: spellOptions.choose,
+          options,
+        });
+      }
+    }
+
     const mechanics = TRAIT_MECHANICS[doc.index];
     if (!mechanics) continue;
     result.hpPerLevel += mechanics.hpPerLevel ?? 0;
-    result.extraCantrips += mechanics.extraCantrips ?? 0;
-    result.luckyRerollOnes ||= mechanics.luckyRerollOnes ?? false;
     for (const damage of mechanics.resistances ?? []) {
       if (!result.resistances.includes(damage)) result.resistances.push(damage);
     }

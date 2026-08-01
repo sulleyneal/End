@@ -483,7 +483,18 @@ export async function performAttack(params: {
 }): Promise<AttackReport> {
   const { encounter, actor } = await requireTurn(params.encounterId, params.actorId);
 
-  if (actor.actionUsed) throw new RuleError(`${actor.name} has already taken an action this turn.`);
+  // Claim the action atomically. Checking `actor.actionUsed` and updating it
+  // later leaves a window in which two simultaneous attacks both pass the check
+  // and one action pays for two swings.
+  const claimed = await db
+    .update(combatants)
+    .set({ actionUsed: true })
+    .where(and(eq(combatants.id, actor.id), eq(combatants.actionUsed, false)))
+    .returning({ id: combatants.id });
+
+  if (claimed.length === 0) {
+    throw new RuleError(`${actor.name} has already taken an action this turn.`);
+  }
 
   const target = encounter.combatants.find((c) => c.id === params.targetId);
   if (!target) throw new NotFoundError("No such target.");
@@ -542,8 +553,6 @@ export async function performAttack(params: {
       damage: damageTaken,
     });
   }
-
-  await db.update(combatants).set({ actionUsed: true }).where(eq(combatants.id, actor.id));
 
   await db.insert(rollsTable).values([
     {
@@ -866,8 +875,19 @@ export async function castSpellAction(params: {
   targetIds: string[];
 }): Promise<{ encounter: EncounterView; cast: CastReport }> {
   const { encounter, actor } = await requireTurn(params.encounterId, params.combatantId);
-  if (actor.actionUsed) throw new RuleError(`${actor.name} has already taken an action this turn.`);
   if (!actor.characterId) throw new RuleError(`${actor.name} has no spellcasting.`);
+
+  // Claimed atomically, as for a weapon attack: two simultaneous casts must not
+  // both pass a read of actionUsed.
+  const claimed = await db
+    .update(combatants)
+    .set({ actionUsed: true })
+    .where(and(eq(combatants.id, actor.id), eq(combatants.actionUsed, false)))
+    .returning({ id: combatants.id });
+
+  if (claimed.length === 0) {
+    throw new RuleError(`${actor.name} has already taken an action this turn.`);
+  }
 
   const sheets = await listCharacters(encounter.campaignId);
   const sheet = sheets.find((s) => s.id === actor.characterId);

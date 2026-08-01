@@ -67,6 +67,8 @@ export type SrdTrait = {
   /** Proficiencies the trait grants outright, e.g. Keen Senses -> Perception. */
   proficiencies?: SrdRef[];
   proficiency_choices?: SrdChoice;
+  /** Extra spells a trait grants, with the exact list to choose from. */
+  trait_specific?: { spell_options?: SrdChoice };
 };
 
 export type SrdRace = {

@@ -1,5 +1,6 @@
 import { skillOptionsFor } from "@/rules/build";
 import { spellListFor, spellcastingPlan } from "@/rules/spells";
+import { resolveTraits } from "@/rules/traits";
 import { equipmentChoicesFor } from "@/rules/equipment";
 import { route } from "@/server/http";
 import { srd } from "@/srd/local";
@@ -17,6 +18,8 @@ export const GET = route(async () => {
   const categories = srd.equipmentCategories();
   const allSpells = srd.spells();
   const levels = srd.levels();
+  const traitDocs = srd.traits();
+  const spellName = new Map(allSpells.map((s) => [s.index, s.name]));
   const equipmentNames = new Map(srd.equipment().map((e) => [e.index, e.name]));
 
   const classes = srd.classes().map((doc) => ({
@@ -65,10 +68,34 @@ export const GET = route(async () => {
     })),
   }));
 
-  const subracesByRace = new Map<string, { index: string; name: string }[]>();
+  type SubraceOption = {
+    index: string;
+    name: string;
+    abilityBonuses: { ability: string; bonus: number }[];
+    spellChoices: { traitName: string; choose: number; options: { index: string; name: string }[] }[];
+  };
+  const subracesByRace = new Map<string, SubraceOption[]>();
   for (const sub of srd.subraces()) {
     const list = subracesByRace.get(sub.race.index) ?? [];
-    list.push({ index: sub.index, name: sub.name });
+    const raceDoc = srd.races().find((r) => r.index === sub.race.index);
+    const traits = raceDoc ? resolveTraits(raceDoc, sub, traitDocs) : null;
+    list.push({
+      index: sub.index,
+      name: sub.name,
+      // The builder needs these to compute a prepared caster's spell count the
+      // same way the server does. It previously used the race's bonuses only,
+      // so every subrace with a casting-ability bonus produced a count the
+      // server rejected — a high elf could not build a wizard at all.
+      abilityBonuses: sub.ability_bonuses.map((b) => ({
+        ability: b.ability_score.index,
+        bonus: b.bonus,
+      })),
+      spellChoices: (traits?.spellChoices ?? []).map((c) => ({
+        traitName: c.traitName,
+        choose: c.choose,
+        options: c.options.map((index) => ({ index, name: spellName.get(index) ?? index })),
+      })),
+    });
     subracesByRace.set(sub.race.index, list);
   }
 
@@ -82,6 +109,11 @@ export const GET = route(async () => {
       bonus: b.bonus,
     })),
     subraces: subracesByRace.get(doc.index) ?? [],
+    spellChoices: resolveTraits(doc, null, traitDocs).spellChoices.map((c) => ({
+      traitName: c.traitName,
+      choose: c.choose,
+      options: c.options.map((index) => ({ index, name: spellName.get(index) ?? index })),
+    })),
     proficiencyChoice: doc.starting_proficiency_options
       ? {
           choose: doc.starting_proficiency_options.choose,

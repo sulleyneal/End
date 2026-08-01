@@ -56,7 +56,21 @@ type Options = {
     name: string;
     speed: number;
     abilityBonuses: { ability: string; bonus: number }[];
-    subraces: { index: string; name: string }[];
+    subraces: {
+      index: string;
+      name: string;
+      abilityBonuses: { ability: string; bonus: number }[];
+      spellChoices: {
+        traitName: string;
+        choose: number;
+        options: { index: string; name: string }[];
+      }[];
+    }[];
+    spellChoices: {
+      traitName: string;
+      choose: number;
+      options: { index: string; name: string }[];
+    }[];
     proficiencyChoice: { choose: number; options: string[] } | null;
   }[];
   skills: { index: string; name: string; ability: string }[];
@@ -81,6 +95,7 @@ export default function Builder({ campaignId }: { campaignId: string }) {
   const [equipment, setEquipment] = useState<Record<number, { option: number; picks: string[] }>>({});
   const [cantripPicks, setCantripPicks] = useState<string[]>([]);
   const [spellPicks, setSpellPicks] = useState<string[]>([]);
+  const [traitSpellPicks, setTraitSpellPicks] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -119,6 +134,7 @@ export default function Builder({ campaignId }: { campaignId: string }) {
     setLastRace(raceIndex);
     setSubraceIndex("");
     setRacePicks([]);
+    setTraitSpellPicks([]);
   }
 
   // The very first load has no previous class to diff against, so seed the
@@ -146,13 +162,28 @@ export default function Builder({ campaignId }: { campaignId: string }) {
   // reassigns ability scores. Known casters take the flat SRD number.
   const casting = classDoc?.spells ?? null;
   const castingAbility = classDoc?.spellcastingAbility as Ability | undefined;
+  const subraceDoc = raceDoc?.subraces.find((s) => s.index === subraceIndex) ?? null;
+
+  // Must match buildLevel1Character exactly, subrace bonuses included. Leaving
+  // them out here produced a count the server rejected, so a hill dwarf cleric
+  // or high elf wizard could not be built at all.
   const castingMod = (() => {
     if (!castingAbility) return 0;
-    const racial = (raceDoc?.abilityBonuses ?? [])
+    const racial = [
+      ...(raceDoc?.abilityBonuses ?? []),
+      ...(subraceDoc?.abilityBonuses ?? []),
+    ]
       .filter((b) => b.ability === castingAbility)
       .reduce((sum, b) => sum + b.bonus, 0);
     return Math.floor((assignment[castingAbility] + racial - 10) / 2);
   })();
+
+  // Spells a racial trait grants, chosen from the trait's own list.
+  const traitSpellChoices = [
+    ...(raceDoc?.spellChoices ?? []),
+    ...(subraceDoc?.spellChoices ?? []),
+  ];
+  const traitSpellsNeeded = traitSpellChoices.reduce((sum, c) => sum + c.choose, 0);
   const cantripsNeeded = casting?.cantripsKnown ?? 0;
   const spellsNeeded = casting
     ? (casting.spellsKnown ?? (classIndex === "wizard" ? 6 : Math.max(1, castingMod + 1)))
@@ -166,6 +197,7 @@ export default function Builder({ campaignId }: { campaignId: string }) {
     skillChoices.length === skillsNeeded &&
     cantripPicks.length === cantripsNeeded &&
     spellPicks.length === spellsNeeded &&
+    traitSpellPicks.length === traitSpellsNeeded &&
     racePicks.length === raceNeeded;
 
   const submit = async () => {
@@ -184,6 +216,7 @@ export default function Builder({ campaignId }: { campaignId: string }) {
           skillChoices,
           cantripChoices: cantripsNeeded > 0 ? cantripPicks : undefined,
           spellChoices: spellsNeeded > 0 ? spellPicks : undefined,
+          traitSpellChoices: traitSpellsNeeded > 0 ? traitSpellPicks : undefined,
           raceProficiencyChoices: raceNeeded > 0 ? racePicks : undefined,
           equipmentSelections: Object.entries(equipment).map(([block, sel]) => ({
             block: Number(block),
@@ -387,6 +420,21 @@ export default function Builder({ campaignId }: { campaignId: string }) {
               spells={casting.level1}
             />
           )}
+        </Card>
+      )}
+
+      {traitSpellChoices.length > 0 && (
+        <Card className="grid gap-4">
+          {traitSpellChoices.map((choice) => (
+            <SpellPicker
+              key={choice.traitName}
+              title={choice.traitName}
+              needed={choice.choose}
+              picks={traitSpellPicks}
+              setPicks={setTraitSpellPicks}
+              spells={choice.options.map((o) => ({ ...o, school: "" }))}
+            />
+          ))}
         </Card>
       )}
 

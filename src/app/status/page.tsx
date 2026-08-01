@@ -100,6 +100,8 @@ const DONE = [
 const NEXT = [
   "Rogue Expertise and Sneak Attack, Monk Martial Arts",
   "Choosing new spells on level-up — slots grow, the spell list does not",
+  "Halfling Lucky, cover, monster condition immunities and dragonborn breath are unimplemented",
+  "Session recaps are written when a co-DM ends the session, not automatically",
   "Ranged attacks in melee do not yet take disadvantage",
   "Battle maps have no walls or difficult terrain yet — the engine enforces both, nothing authors them",
 ];

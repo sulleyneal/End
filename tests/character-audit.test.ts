@@ -839,3 +839,110 @@ describe("XP thresholds and levelling", () => {
     expect(derived.hpMaxByAverage).toBe(49);
   });
 });
+
+
+/* ------------------------------------------------------------------ *
+ * Racial spell grants
+ *
+ * A high elf could not build any spellcaster: the builder offered the
+ * class's cantrip count while the server demanded one more, so every
+ * submission was rejected. The extra cantrip is also a *wizard* cantrip —
+ * folding it into the class count let a high elf cleric take a fourth
+ * cleric cantrip instead.
+ * ------------------------------------------------------------------ */
+
+describe("trait-granted spells", () => {
+  const categories = srd.equipmentCategories();
+  const firstLegalKit = (classIndex: string) =>
+    equipmentChoicesFor(srdGet.class(classIndex), categories).map((block) => ({
+      block: block.block,
+      option: 0,
+      picks: block.options[0].picks.map((pick) => pick.from[0]),
+    }));
+  const skillPicksFor = (classDoc: ReturnType<typeof srdGet.class>) => {
+    const block = skillOptionsFor(classDoc);
+    return block ? block.options.slice(0, block.choose) : [];
+  };
+
+  const build = (over: Record<string, unknown>) =>
+    buildLevel1Character(
+      {
+        name: "Trait probe",
+        classIndex: "wizard",
+        raceIndex: "elf",
+        subraceIndex: "high-elf",
+        scores: { str: 8, dex: 14, con: 13, int: 15, wis: 12, cha: 10 },
+        scoreMethod: "standard-array",
+        skillChoices: skillPicksFor(srdGet.class("wizard")).slice(0, 2),
+        equipmentSelections: firstLegalKit("wizard"),
+        cantripChoices: ["fire-bolt", "light", "prestidigitation"],
+        spellChoices: spellListFor(srd.spells(), "wizard", 1)
+          .filter((s) => s.level === 1)
+          .slice(0, 6)
+          .map((s) => s.index),
+        ...over,
+      } as never,
+      {
+        classDoc: srdGet.class("wizard"),
+        raceDoc: srdGet.race("elf"),
+        subraceDoc: srdGet.subrace("high-elf"),
+        levelDoc: srdGet.level("wizard", 1),
+        equipmentCategories: srd.equipmentCategories(),
+        equipmentDocs: srd.equipment(),
+        traitDocs: srd.traits(),
+        spellDocs: srd.spells(),
+      },
+    );
+
+  it("a high elf wizard builds when the trait cantrip is chosen", () => {
+    const built = build({ traitSpellChoices: ["mage-hand"] });
+    expect(built.spells.map((s) => s.spellIndex)).toContain("mage-hand");
+    // Three class cantrips plus the trait's one.
+    expect(built.spells.filter((s) => s.alwaysPrepared)).toHaveLength(4);
+  });
+
+  it("refuses a spell the trait does not offer", () => {
+    // Sacred Flame is a cleric cantrip and is not on High Elf Cantrip's list.
+    expect(() => build({ traitSpellChoices: ["sacred-flame"] })).toThrow(
+      /not offered by High Elf Cantrip/,
+    );
+  });
+
+  it("refuses the wrong number of trait spells", () => {
+    expect(() => build({ traitSpellChoices: [] })).toThrow(/choose exactly 1/);
+    expect(() => build({ traitSpellChoices: ["mage-hand", "message"] })).toThrow(
+      /choose exactly 1/,
+    );
+  });
+
+  it("a race with no spell trait refuses any trait pick", () => {
+    expect(() =>
+      buildLevel1Character(
+        {
+          name: "Human wizard",
+          classIndex: "wizard",
+          raceIndex: "human",
+          scores: { str: 8, dex: 14, con: 13, int: 15, wis: 12, cha: 10 },
+          scoreMethod: "standard-array",
+          skillChoices: skillPicksFor(srdGet.class("wizard")).slice(0, 2),
+          equipmentSelections: firstLegalKit("wizard"),
+          cantripChoices: ["fire-bolt", "light", "prestidigitation"],
+          spellChoices: spellListFor(srd.spells(), "wizard", 1)
+            .filter((s) => s.level === 1)
+            .slice(0, 6)
+            .map((s) => s.index),
+          traitSpellChoices: ["mage-hand"],
+        } as never,
+        {
+          classDoc: srdGet.class("wizard"),
+          raceDoc: srdGet.race("human"),
+          levelDoc: srdGet.level("wizard", 1),
+          equipmentCategories: srd.equipmentCategories(),
+          equipmentDocs: srd.equipment(),
+          traitDocs: srd.traits(),
+          spellDocs: srd.spells(),
+        },
+      ),
+    ).toThrow(/grants no extra spells/);
+  });
+});

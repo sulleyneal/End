@@ -142,6 +142,8 @@ export type BuildRequest = {
   cantripChoices?: string[];
   /** Levelled spell indexes: known spells, or a wizard's opening spellbook. */
   spellChoices?: string[];
+  /** Spells granted by a racial trait, e.g. the High Elf Cantrip. */
+  traitSpellChoices?: string[];
 };
 
 export type BuiltCharacter = {
@@ -339,7 +341,7 @@ export function buildLevel1Character(
     const plan = spellcastingPlan({
       classIndex: request.classIndex,
       level: 1,
-      cantripsKnown: (casting.cantrips_known ?? 0) + traits.extraCantrips,
+      cantripsKnown: casting.cantrips_known ?? 0,
       spellsKnown: casting.spells_known,
       castingModifier: abilityModifier(abilityScore),
     });
@@ -381,6 +383,30 @@ export function buildLevel1Character(
     }
   } else if ((request.cantripChoices ?? []).length || (request.spellChoices ?? []).length) {
     throw new BuildError(`${ctx.classDoc.name} does not cast spells at level 1.`);
+  }
+
+  // Trait-granted spells are chosen from the trait's own list, not the class's.
+  // High Elf Cantrip grants one wizard cantrip; folding it into the class count
+  // let a high elf cleric take a fourth *cleric* cantrip instead.
+  const traitPicks = [...new Set(request.traitSpellChoices ?? [])];
+  const traitWanted = traits.spellChoices.reduce((sum, c) => sum + c.choose, 0);
+  if (traitPicks.length !== traitWanted) {
+    throw new BuildError(
+      traitWanted === 0
+        ? `${ctx.raceDoc.name} grants no extra spells.`
+        : `${traits.spellChoices.map((c) => c.traitName).join(" and ")}: choose exactly ${traitWanted}, got ${traitPicks.length}.`,
+    );
+  }
+  for (const choice of traits.spellChoices) {
+    for (const pick of traitPicks) {
+      if (!choice.options.includes(pick)) {
+        throw new BuildError(`"${pick}" is not offered by ${choice.traitName}.`);
+      }
+    }
+  }
+  for (const pick of traitPicks) {
+    if (spells.some((s) => s.spellIndex === pick)) continue;
+    spells.push({ spellIndex: pick, prepared: true, alwaysPrepared: true });
   }
 
   return {

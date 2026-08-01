@@ -351,7 +351,9 @@ export function deriveCharacter(
       modifier: mod(ability),
       saveDc: 8 + proficiencyBonus + mod(ability),
       attackBonus: proficiencyBonus + mod(ability),
-      cantripsKnown: (casting?.cantrips_known ?? 0) + traits.extraCantrips,
+      cantripsKnown:
+        (casting?.cantrips_known ?? 0) +
+        traits.spellChoices.reduce((sum, c) => sum + c.choose, 0),
       spellsKnown: casting?.spells_known,
       slots,
     };

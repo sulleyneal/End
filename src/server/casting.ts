@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { characterSpells, combatants, rolls as rollsTable, spellSlots } from "@/db/schema";
 import type { AbilityKey } from "@/srd/types";
@@ -153,16 +153,27 @@ export async function castSpell(params: {
   }
 
   // Spend the slot now. A missed spell still costs you the slot.
+  //
+  // One statement, conditional on the slot still being free, because a
+  // read-then-write races: two simultaneous casts both read the same `used`
+  // and both write used+1, so one slot pays for two spells. The event log
+  // already avoids this shape for the same reason.
   if (!spent.cantrip) {
-    await db
+    const claimed = await db
       .update(spellSlots)
-      .set({ used: (slots.find((s) => s.level === params.slotLevel)?.used ?? 0) + 1 })
+      .set({ used: sql`${spellSlots.used} + 1` })
       .where(
         and(
           eq(spellSlots.characterId, caster.characterId),
           eq(spellSlots.level, params.slotLevel),
+          lt(spellSlots.used, spellSlots.max),
         ),
-      );
+      )
+      .returning({ level: spellSlots.level });
+
+    if (claimed.length === 0) {
+      throw new RuleError(`Your level ${params.slotLevel} spell slots are all spent.`);
+    }
   }
 
   const shape = shapeOf(spell);
@@ -302,8 +313,6 @@ export async function castSpell(params: {
       .where(eq(combatants.id, caster.id));
     report.concentrating = true;
   }
-
-  await db.update(combatants).set({ actionUsed: true }).where(eq(combatants.id, caster.id));
 
   if (report.attackRoll || report.damageRoll) {
     await db.insert(rollsTable).values({
