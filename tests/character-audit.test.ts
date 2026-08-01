@@ -5,6 +5,8 @@ import {
   type CharacterRecord,
   type DeriveContext,
   deriveCharacter,
+  levelForXp,
+  xpToNextLevel,
 } from "@/rules/character";
 import { buildLevel1Character, skillOptionsFor } from "@/rules/build";
 import { equipmentChoicesFor } from "@/rules/equipment";
@@ -793,5 +795,47 @@ describe("racial traits reach the sheet", () => {
 
     const human = resolveTraits(srdGet.race("human"), null, srd.traits());
     expect(human.resistances).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Levelling
+ *
+ * XP was awarded and tracked but never consumed, so every character in the
+ * app stayed level 1 forever — which also made this audit's "across
+ * different classes and levels" unreachable. These check the arithmetic
+ * levelling depends on, against the PHB thresholds written out above.
+ * ------------------------------------------------------------------ */
+
+describe("XP thresholds and levelling", () => {
+  const CASES: [number, number][] = [
+    [0, 1], [299, 1], [300, 2], [899, 2], [900, 3], [2699, 3], [2700, 4],
+    [6500, 5], [14000, 6], [23000, 7], [34000, 8], [48000, 9], [64000, 10],
+    [85000, 11], [100000, 12], [120000, 13], [140000, 14], [165000, 15],
+    [195000, 16], [225000, 17], [265000, 18], [305000, 19], [355000, 20],
+    [999999, 20],
+  ];
+
+  it.each(CASES)("%s XP is level %s", (xp, expected) => {
+    expect(levelForXp(xp)).toBe(expected);
+  });
+
+  it("reports what is still needed for the next level", () => {
+    expect(xpToNextLevel(0)).toBe(300);
+    expect(xpToNextLevel(299)).toBe(1);
+    expect(xpToNextLevel(300)).toBe(600);
+    expect(xpToNextLevel(355000)).toBeNull();
+  });
+
+  it("hit points per level use the average-roll convention", () => {
+    // A d10 class averages 6 a level (floor(10/2)+1), so a level-5 fighter
+    // with Con +3 has 10+3 + 4 * (6+3) = 49.
+    const derived = deriveCharacter(
+      { ...characterAt("fighter", "human", 5), con: 16 },
+      contextFor("fighter", "human", 5),
+    );
+    // Human adds +1 Con: 16+1 = 17 -> +3.
+    expect(derived.abilities.con.modifier).toBe(3);
+    expect(derived.hpMaxByAverage).toBe(49);
   });
 });

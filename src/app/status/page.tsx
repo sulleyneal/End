@@ -85,7 +85,8 @@ const DONE = [
   "Encounters: server-rolled initiative, turn gating, reach and range, resolved opportunity attacks",
   "Spellcasting: known and prepared spells, slots that get spent, upcasting, concentration",
   "Campaign generation: arc, NPCs, locations, plot threads and an opening scene",
-  "Session recaps written to a campaign journal",
+  "Session recaps written to a campaign journal, aware of what happened in combat",
+  "Levelling from XP: hit points, hit dice and spell slots at the new level",
   "Grid battle map with tap-to-move over server-validated movement",
   "AI DM over tool-use intents — it cannot express a number that matters",
   "Table chat between the players — instant, free, and invisible to the DM",
@@ -96,9 +97,9 @@ const NEXT = [
   "3D dice tray replaying the server's roll",
   "Short and long rest UI (the engine is done and tested)",
   "Async turns with a what-you-missed recap for the player who was away",
-  "Levelling: XP is awarded and tracked but nothing levels up yet",
   "Uploadable character portraits",
   "Rogue Expertise and Sneak Attack, Monk Martial Arts",
+  "Choosing new spells on level-up — slots grow, the spell list does not",
   "Ranged attacks in melee do not yet take disadvantage",
   "Battle maps have no walls or difficult terrain yet — the engine enforces both, nothing authors them",
 ];
@@ -106,7 +107,6 @@ const NEXT = [
 /** Deliberately listed: an honest status page has to include what is wrong. */
 const KNOWN_GAPS = [
   "Every campaign generated before 1 Aug has no arc or opening scene",
-  "The AI DM cannot make a monster roll a saving throw, only a player character",
   "A rogue may end up wielding the dagger rather than the rapier, and there is no equip control",
   "The AI DM can remove a condition it did not apply, which is a way around the engine",
 ];

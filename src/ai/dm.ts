@@ -18,7 +18,7 @@ import { abilityCheckModifiers, isCondition } from "@/rules/conditions";
 import { resolveSave } from "@/rules/combat";
 import { combineAdvantage, rollD20 } from "@/rules/dice";
 import type { AbilityKey } from "@/srd/types";
-import { listCharacters } from "@/server/characters";
+import { applyLevelUps, listCharacters } from "@/server/characters";
 import { getActiveEncounter, performAttack, startEncounter } from "@/server/encounters";
 import { appendEvent } from "@/server/events";
 import { DM_MODEL, anthropic } from "./client";
@@ -131,6 +131,81 @@ async function postMessage(
   });
 }
 
+/**
+ * Anything the DM can call on to roll: a player character, or a monster in the
+ * encounter that is running.
+ *
+ * `call_for_save` and `call_for_check` used to resolve player characters only,
+ * so no monster could ever be made to roll. The DM's fallback was to apply the
+ * condition unrolled — a player could talk a condition onto a goblin with no
+ * die involved, in an app whose whole premise is that the engine is referee.
+ */
+async function findRollerByName(
+  campaignId: string,
+  name: string,
+): Promise<
+  | {
+      kind: "character" | "monster";
+      id: string;
+      name: string;
+      conditions: string[];
+      exhaustion: number;
+      saveModifier: (ability: AbilityKey) => number;
+      checkModifier: (key: string) => { modifier: number; label: string } | null;
+    }
+  | null
+> {
+  const sheet = await findCharacterByName(campaignId, name);
+  if (sheet) {
+    return {
+      kind: "character",
+      id: sheet.id,
+      name: sheet.name,
+      conditions: sheet.conditions,
+      exhaustion: sheet.exhaustion,
+      saveModifier: (ability) => sheet.derived.saves[ability].modifier,
+      checkModifier: (key) => {
+        const skill = sheet.derived.skills[key];
+        if (skill) return { modifier: skill.modifier, label: skill.name };
+        const abilities: AbilityKey[] = ["str", "dex", "con", "int", "wis", "cha"];
+        const asAbility = abilities.find((a) => a === key);
+        if (!asAbility) return null;
+        return {
+          modifier: sheet.derived.abilities[asAbility].modifier,
+          label: asAbility.toUpperCase(),
+        };
+      },
+    };
+  }
+
+  const encounter = await getActiveEncounter(campaignId);
+  const needle = name.trim().toLowerCase();
+  const monster =
+    encounter?.combatants.find((c) => !c.characterId && c.name.toLowerCase() === needle) ??
+    encounter?.combatants.find((c) => !c.characterId && c.name.toLowerCase().includes(needle));
+  if (!monster) return null;
+
+  const stats = monster.stats as { saveModifiers?: Record<string, number>; abilities?: Record<string, number> } | null;
+  const saves = stats?.saveModifiers ?? {};
+  const scores = stats?.abilities ?? {};
+
+  return {
+    kind: "monster",
+    id: monster.id,
+    name: monster.name,
+    conditions: monster.conditions,
+    exhaustion: monster.exhaustion,
+    saveModifier: (ability) => saves[ability] ?? 0,
+    checkModifier: (key) => {
+      const abilities: AbilityKey[] = ["str", "dex", "con", "int", "wis", "cha"];
+      const asAbility = abilities.find((a) => a === key);
+      if (!asAbility) return null;
+      const score = scores[asAbility] ?? 10;
+      return { modifier: Math.floor((score - 10) / 2), label: asAbility.toUpperCase() };
+    },
+  };
+}
+
 async function findCharacterByName(campaignId: string, name: string) {
   const sheets = await listCharacters(campaignId);
   const needle = name.trim().toLowerCase();
@@ -184,20 +259,17 @@ async function executeTool(ctx: Ctx, name: string, rawInput: unknown): Promise<s
 
     case "call_for_check": {
       const input = callForCheckSchema.parse(rawInput);
-      const sheet = await findCharacterByName(ctx.campaignId, input.character);
-      if (!sheet) return `There is no character called "${input.character}" in this campaign.`;
-
-      const key = input.skill.trim().toLowerCase();
-      const skill = sheet.derived.skills[key];
-      const abilities: AbilityKey[] = ["str", "dex", "con", "int", "wis", "cha"];
-      const asAbility = abilities.find((a) => a === key);
-
-      if (!skill && !asAbility) {
-        return `"${input.skill}" is not an SRD skill or ability. Valid skills: ${Object.keys(sheet.derived.skills).join(", ")}.`;
+      const sheet = await findRollerByName(ctx.campaignId, input.character);
+      if (!sheet) {
+        return `There is nobody called "${input.character}" in this campaign or the current encounter.`;
       }
 
-      const modifier = skill ? skill.modifier : sheet.derived.abilities[asAbility!].modifier;
-      const label = skill ? skill.name : asAbility!.toUpperCase();
+      const key = input.skill.trim().toLowerCase();
+      const resolved = sheet.checkModifier(key);
+      if (!resolved) {
+        return `"${input.skill}" is not an SRD skill or ability for ${sheet.name}.`;
+      }
+      const { modifier, label } = resolved;
 
       // Conditions and exhaustion can impose disadvantage on ability checks.
       const advantage = combineAdvantage([
@@ -208,7 +280,7 @@ async function executeTool(ctx: Ctx, name: string, rawInput: unknown): Promise<s
 
       await db.insert(rollsTable).values({
         campaignId: ctx.campaignId,
-        actorType: "character",
+        actorType: sheet.kind,
         actorId: sheet.id,
         actorName: sheet.name,
         kind: "check",
@@ -238,12 +310,14 @@ async function executeTool(ctx: Ctx, name: string, rawInput: unknown): Promise<s
 
     case "call_for_save": {
       const input = callForSaveSchema.parse(rawInput);
-      const sheet = await findCharacterByName(ctx.campaignId, input.character);
-      if (!sheet) return `There is no character called "${input.character}" in this campaign.`;
+      const sheet = await findRollerByName(ctx.campaignId, input.character);
+      if (!sheet) {
+        return `There is nobody called "${input.character}" in this campaign or the current encounter.`;
+      }
 
       const outcome = resolveSave({
         ability: input.ability,
-        modifier: sheet.derived.saves[input.ability].modifier,
+        modifier: sheet.saveModifier(input.ability),
         dc: input.dc,
         creature: { conditions: sheet.conditions, exhaustion: sheet.exhaustion },
       });
@@ -251,7 +325,7 @@ async function executeTool(ctx: Ctx, name: string, rawInput: unknown): Promise<s
       if (outcome.roll) {
         await db.insert(rollsTable).values({
           campaignId: ctx.campaignId,
-          actorType: "character",
+          actorType: sheet.kind,
           actorId: sheet.id,
           actorName: sheet.name,
           kind: "save",
@@ -561,12 +635,17 @@ async function executeTool(ctx: Ctx, name: string, rawInput: unknown): Promise<s
     case "award_xp": {
       const input = awardXpSchema.parse(rawInput);
       const sheets = await listCharacters(ctx.campaignId);
+      const levelled: string[] = [];
       for (const sheet of sheets) {
         await db
           .update(characters)
           .set({ xp: sheet.xp + input.amount })
           .where(eq(characters.id, sheet.id));
+        // XP used to be tracked and never spent, so everyone stayed level 1.
+        const gained = await applyLevelUps(sheet.id);
+        if (gained > 0) levelled.push(`${sheet.name} to level ${sheet.level + gained}`);
       }
+
       await postMessage(ctx, {
         authorType: "system",
         authorName: "System",
@@ -574,7 +653,20 @@ async function executeTool(ctx: Ctx, name: string, rawInput: unknown): Promise<s
         content: `The party gains ${input.amount} XP — ${input.reason}.`,
         metadata: { kind: "xp", amount: input.amount },
       });
-      return `Awarded ${input.amount} XP to ${sheets.length} character(s).`;
+
+      if (levelled.length > 0) {
+        await postMessage(ctx, {
+          authorType: "system",
+          authorName: "System",
+          kind: "system",
+          content: `Level up: ${levelled.join(", ")}.`,
+          metadata: { kind: "level-up" },
+        });
+      }
+
+      return `Awarded ${input.amount} XP to ${sheets.length} character(s).${
+        levelled.length > 0 ? ` Levelled up: ${levelled.join(", ")}.` : ""
+      }`;
     }
 
     default:

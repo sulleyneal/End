@@ -10,6 +10,8 @@ import {
 import { type BuildRequest, buildLevel1Character } from "@/rules/build";
 import { type DerivedCharacter, deriveCharacter } from "@/rules/character";
 import { srd, srdGet } from "@/srd/local";
+import { abilityModifier, levelForXp } from "@/rules/character";
+import { resolveTraits } from "@/rules/traits";
 import { NotFoundError } from "./http";
 import { appendEvent } from "./events";
 
@@ -299,4 +301,80 @@ export async function setItemEquipped(params: {
     armorClass: sheet.derived.armorClass.value,
   });
   return sheet;
+}
+
+/**
+ * Applies every level a character's XP has earned.
+ *
+ * XP was awarded and tracked but nothing ever consumed it, so every character
+ * in the app was level 1 forever — which also made the done-bar's "characters
+ * across different classes and levels" unreachable.
+ *
+ * Hit points use the SRD average-roll convention rather than rolling, so a
+ * character's maximum is reproducible and can be audited against a hand
+ * calculation. Slots are recomputed from the class's level document rather than
+ * incremented, so they are always exactly what the table says.
+ *
+ * Returns the levels gained, or 0 when nothing changed.
+ */
+export async function applyLevelUps(characterId: string): Promise<number> {
+  const [row] = await db.select().from(characters).where(eq(characters.id, characterId)).limit(1);
+  if (!row) return 0;
+
+  const earned = Math.min(20, levelForXp(row.xp));
+  if (earned <= row.level) return 0;
+
+  const classDoc = srdGet.class(row.class);
+  const raceDoc = srdGet.race(row.race);
+  const subraceDoc = row.subrace ? srdGet.subrace(row.subrace) : null;
+  const traits = resolveTraits(raceDoc, subraceDoc, srd.traits());
+
+  const conBonus = [...(raceDoc.ability_bonuses ?? []), ...(subraceDoc?.ability_bonuses ?? [])]
+    .filter((b) => b.ability_score.index === "con")
+    .reduce((sum, b) => sum + b.bonus, 0);
+  const conMod = abilityModifier(row.con + conBonus);
+
+  const averagePerLevel = Math.floor(classDoc.hit_die / 2) + 1;
+  const gained = earned - row.level;
+  let hpMax = row.hpMax;
+  for (let i = 0; i < gained; i++) {
+    hpMax += Math.max(1, averagePerLevel + conMod + traits.hpPerLevel);
+  }
+
+  await db
+    .update(characters)
+    .set({
+      level: earned,
+      hpMax,
+      // Levelling does not heal, but it does raise the ceiling.
+      hpCurrent: row.hpCurrent > 0 ? row.hpCurrent + (hpMax - row.hpMax) : row.hpCurrent,
+      hitDiceRemaining: Math.min(earned, row.hitDiceRemaining + gained),
+    })
+    .where(eq(characters.id, characterId));
+
+  // Slots come from the class table at the new level, never by increment.
+  const levelDoc = srd.levels().find((l) => l.index === `${row.class}-${earned}`);
+  const casting = levelDoc?.spellcasting as Record<string, number | undefined> | undefined;
+  if (casting) {
+    for (let level = 1; level <= 9; level++) {
+      const max = casting[`spell_slots_level_${level}`] ?? 0;
+      if (max <= 0) continue;
+      const existing = await db
+        .select()
+        .from(spellSlots)
+        .where(and(eq(spellSlots.characterId, characterId), eq(spellSlots.level, level)))
+        .limit(1);
+
+      if (existing.length > 0) {
+        await db
+          .update(spellSlots)
+          .set({ max })
+          .where(and(eq(spellSlots.characterId, characterId), eq(spellSlots.level, level)));
+      } else {
+        await db.insert(spellSlots).values({ characterId, level, max, used: 0 });
+      }
+    }
+  }
+
+  return gained;
 }
