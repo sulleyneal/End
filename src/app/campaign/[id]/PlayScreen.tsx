@@ -8,6 +8,7 @@ import { Button, ErrorNote, inputClass } from "@/components/ui";
 import { DiceLog } from "@/components/DiceLog";
 import { PartyPanel } from "@/components/PartyPanel";
 import { LogEntry, type Entry } from "@/components/LogEntry";
+import { CombatPanel, type Encounter } from "@/components/CombatPanel";
 
 type Roll = {
   id: string;
@@ -46,7 +47,7 @@ type State = {
   messages: Entry[];
   rolls: Roll[];
   characters: Sheet[];
-  encounter: { name: string; round: number; activeCombatantId: string | null } | null;
+  encounter: Encounter | null;
   cursor: number;
 };
 
@@ -57,7 +58,7 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
   const [error, setError] = useState("");
   const [action, setAction] = useState("");
   const [thinking, setThinking] = useState(false);
-  const [tab, setTab] = useState<"story" | "party" | "dice">("story");
+  const [tab, setTab] = useState<"story" | "combat" | "party" | "dice">("story");
   const bottom = useRef<HTMLDivElement>(null);
   const seen = useRef(new Set<string>());
 
@@ -189,15 +190,13 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
         </div>
       </header>
 
-      {state.encounter && (
-        <div className="mb-3 rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-4 py-2 text-sm">
-          <strong>{state.encounter.name}</strong> — round {state.encounter.round}
-        </div>
-      )}
-
-      {/* Mobile tabs; on wide screens everything is visible at once. */}
+      {/* Mobile tabs; on wide screens everything is visible at once. Combat only
+          appears while there is an encounter to act in. */}
       <nav className="mb-3 flex gap-1 lg:hidden">
-        {(["story", "party", "dice"] as const).map((t) => (
+        {(state.encounter
+          ? (["story", "combat", "party", "dice"] as const)
+          : (["story", "party", "dice"] as const)
+        ).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -265,10 +264,22 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
         </section>
 
         <aside className={`space-y-4 ${tab === "story" ? "hidden lg:block" : ""}`}>
-          <div className={tab === "dice" ? "hidden lg:block" : ""}>
+          {state.encounter && (
+            <div className={tab === "party" || tab === "dice" ? "hidden lg:block" : ""}>
+              <CombatPanel
+                encounter={state.encounter}
+                myCharacterIds={state.characters
+                  .filter((c) => c.userId === state.me.id)
+                  .map((c) => c.id)}
+                canCommandAll={state.me.role === "co_dm"}
+                onChanged={() => void refreshSide()}
+              />
+            </div>
+          )}
+          <div className={tab === "dice" || tab === "combat" ? "hidden lg:block" : ""}>
             <PartyPanel characters={state.characters} meId={state.me.id} />
           </div>
-          <div className={tab === "party" ? "hidden lg:block" : ""}>
+          <div className={tab === "party" || tab === "combat" ? "hidden lg:block" : ""}>
             <DiceLog rolls={rolls} />
           </div>
         </aside>

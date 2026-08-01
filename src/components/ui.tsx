@@ -11,6 +11,7 @@ export function Button({
   variant = "primary",
   disabled,
   className = "",
+  testId,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -18,6 +19,7 @@ export function Button({
   variant?: "primary" | "secondary" | "ghost";
   disabled?: boolean;
   className?: string;
+  testId?: string;
 }) {
   const styles = {
     primary: "bg-[var(--accent)] text-white hover:opacity-90",
@@ -31,6 +33,7 @@ export function Button({
       type={type}
       onClick={onClick}
       disabled={disabled}
+      data-testid={testId}
       className={`rounded-lg px-4 py-2.5 text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed ${styles} ${className}`}
     >
       {children}
