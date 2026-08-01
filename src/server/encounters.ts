@@ -201,7 +201,7 @@ export async function startEncounter(
     }
   }
 
-  const inserted = await db.insert(combatants).values(rows).returning();
+  await db.insert(combatants).values(rows);
 
   // Persist every initiative roll so the log can show how the order was decided.
   await db.insert(rollsTable).values(

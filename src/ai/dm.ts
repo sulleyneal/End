@@ -18,7 +18,7 @@ import { abilityCheckModifiers, isCondition } from "@/rules/conditions";
 import { resolveSave } from "@/rules/combat";
 import { combineAdvantage, rollD20 } from "@/rules/dice";
 import type { AbilityKey } from "@/srd/types";
-import { getCharacterSheet, listCharacters } from "@/server/characters";
+import { listCharacters } from "@/server/characters";
 import { getActiveEncounter, performAttack, startEncounter } from "@/server/encounters";
 import { appendEvent } from "@/server/events";
 import { DM_MODEL, anthropic } from "./client";

@@ -1,26 +1,68 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * House rule 7: this reads like a well-made modern app, not a fantasy pastiche.
+ * System font stack, high contrast, mobile-first. No parchment, no gothic body
+ * text — the *writing* carries the atmosphere.
+ */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+:root {
+  --background: #fbfbfa;
+  --surface: #ffffff;
+  --surface-2: #f4f4f2;
+  --border: #e2e2df;
+  --foreground: #17171a;
+  --muted: #6b6b73;
+  --accent: #3b5bdb;
+  --accent-soft: #eef1fd;
+  --ruling: #b45309;
+  --ruling-soft: #fdf5e7;
+  --danger: #b42318;
+  --success: #15803d;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0d0d0f;
+    --surface: #151518;
+    --surface-2: #1d1d21;
+    --border: #2a2a30;
+    --foreground: #ececf0;
+    --muted: #9a9aa4;
+    --accent: #8ba3ff;
+    --accent-soft: #1a1f36;
+    --ruling: #e8a33d;
+    --ruling-soft: #2a2113;
+    --danger: #ff8a7d;
+    --success: #6ee7a0;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-ruling: var(--ruling);
+  --color-ruling-soft: var(--ruling-soft);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers in the sheet and the dice log should line up in columns. */
+.tabular {
+  font-variant-numeric: tabular-nums;
 }

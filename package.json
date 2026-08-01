@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "node tests/e2e/play.mjs",
     "db:push": "drizzle-kit push --force",
     "db:seed": "tsx scripts/seed-srd.ts",
     "db:reset": "tsx scripts/reset-db.ts"
@@ -31,6 +32,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
+    "playwright": "^1.62.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
     "typescript": "^5",
