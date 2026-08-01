@@ -43,14 +43,21 @@ const WORDS_B = [
 ];
 
 /**
- * A personal reclaim code, e.g. `silver-raven-4127`. Shown once, stored only as
- * a hash. It lets a player pick their character back up on another device
- * without an account.
+ * A personal reclaim code, e.g. `silver-raven-anvil-4127`. Shown once, stored
+ * only as a hash. It lets a player pick their character back up on another
+ * device without an account.
+ *
+ * Three words and four digits rather than two and four: a reclaim code is a
+ * full credential — anyone holding one becomes that player — and two words gave
+ * only ~5.2 million combinations, which an unthrottled attacker can walk in
+ * hours. A third word takes it past 100 million, and the throttle in
+ * `reclaimUser` does the rest.
  */
 export function generateReclaimCode(): string {
   const a = WORDS_A[randomInt(0, WORDS_A.length)];
   const b = WORDS_B[randomInt(0, WORDS_B.length)];
-  return `${a}-${b}-${randomInt(1000, 10000)}`;
+  const c = WORDS_B[randomInt(0, WORDS_B.length)];
+  return `${a}-${b}-${c}-${randomInt(1000, 10000)}`;
 }
 
 export function normalizeReclaimCode(input: string): string {

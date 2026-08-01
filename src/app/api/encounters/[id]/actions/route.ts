@@ -58,19 +58,33 @@ export const POST = route(
     const combatant = encounter.combatants.find((c) => c.id === body.combatantId);
     if (!combatant) return Response.json({ error: "No such combatant." }, { status: 404 });
 
-    if (membership.role !== "co_dm") {
-      const owner = combatant.characterId
-        ? (
-            await db
-              .select({ userId: characters.userId })
-              .from(characters)
-              .where(eq(characters.id, combatant.characterId))
-              .limit(1)
-          )[0]?.userId
-        : null;
-      if (owner !== user.id) {
-        return Response.json({ error: "That is not your character to command." }, { status: 403 });
-      }
+    // A co-DM runs the monsters; nobody runs somebody else's character.
+    //
+    // Scoping this matters because whoever creates a table is a co-DM by
+    // default, which is usually just a player. Without the second clause they
+    // could end a friend's turn or walk that friend's character into a fire.
+    const owner = combatant.characterId
+      ? (
+          await db
+            .select({ userId: characters.userId })
+            .from(characters)
+            .where(eq(characters.id, combatant.characterId))
+            .limit(1)
+        )[0]?.userId
+      : null;
+
+    const isMonster = combatant.characterId === null;
+    const allowed = owner === user.id || (membership.role === "co_dm" && isMonster);
+
+    if (!allowed) {
+      return Response.json(
+        {
+          error: isMonster
+            ? "Only a co-DM commands the monsters."
+            : "That is not your character to command.",
+        },
+        { status: 403 },
+      );
     }
 
     switch (body.type) {

@@ -17,7 +17,16 @@ export const POST = route(async (request: Request) => {
   const body = bodySchema.parse(await readJson(request));
 
   if ("reclaimCode" in body) {
-    return Response.json({ user: await reclaimUser(body.reclaimCode), reclaimCode: null });
+    // Vercel sets x-forwarded-for; without it every caller shares one bucket,
+    // which throttles conservatively rather than not at all.
+    const fingerprint =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "unknown";
+    return Response.json({
+      user: await reclaimUser(body.reclaimCode, fingerprint),
+      reclaimCode: null,
+    });
   }
 
   const { user, reclaimCode } = await createUser(body.displayName);

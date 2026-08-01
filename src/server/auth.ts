@@ -1,7 +1,7 @@
-import { and, eq, gt } from "drizzle-orm";
+import { and, count as countRows, eq, gt } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/db";
-import { authSessions, campaignMembers, campaigns, users } from "@/db/schema";
+import { authAttempts, authSessions, campaignMembers, campaigns, users } from "@/db/schema";
 import {
   generateReclaimCode,
   generateSessionToken,
@@ -111,8 +111,35 @@ export async function createUser(
   return { user: row, reclaimCode };
 }
 
-/** Signs in as an existing player on a new device using their reclaim code. */
-export async function reclaimUser(code: string): Promise<SessionUser> {
+/** Wrong guesses allowed from one client in the window before it is cut off. */
+const RECLAIM_ATTEMPT_LIMIT = 10;
+const RECLAIM_WINDOW_MINUTES = 15;
+
+/**
+ * Signs in as an existing player on a new device using their reclaim code.
+ *
+ * Throttled per client, because a reclaim code is a full credential: whoever
+ * presents one becomes that player, with their characters and campaigns. An
+ * unthrottled endpoint can be walked at hundreds of guesses a minute, which
+ * turns a code people read aloud at a table into a real takeover risk.
+ */
+export async function reclaimUser(code: string, fingerprint = "unknown"): Promise<SessionUser> {
+  const since = new Date(Date.now() - RECLAIM_WINDOW_MINUTES * 60_000);
+  const [{ count } = { count: 0 }] = await db
+    .select({ count: countRows() })
+    .from(authAttempts)
+    .where(
+      and(
+        eq(authAttempts.fingerprint, fingerprint),
+        eq(authAttempts.kind, "reclaim"),
+        gt(authAttempts.createdAt, since),
+      ),
+    );
+
+  if (count >= RECLAIM_ATTEMPT_LIMIT) {
+    throw new AuthError("Too many reclaim attempts. Wait a few minutes and try again.");
+  }
+
   const hash = hashToken(normalizeReclaimCode(code));
   const rows = await db
     .select({ id: users.id, displayName: users.displayName })
@@ -120,7 +147,10 @@ export async function reclaimUser(code: string): Promise<SessionUser> {
     .where(eq(users.reclaimCodeHash, hash))
     .limit(1);
 
-  if (rows.length === 0) throw new AuthError("That reclaim code does not match any player.");
+  if (rows.length === 0) {
+    await db.insert(authAttempts).values({ fingerprint, kind: "reclaim" });
+    throw new AuthError("That reclaim code does not match any player.");
+  }
 
   await issueSession(rows[0].id);
   return rows[0];

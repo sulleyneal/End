@@ -199,6 +199,25 @@ export const authSessions = pgTable(
 export type CampaignStatus = "lobby" | "active" | "paused" | "ended";
 export type MemberRole = "player" | "co_dm" | "observer";
 
+/**
+ * Failed credential attempts, for throttling.
+ *
+ * A reclaim code is a full credential, so guessing must cost something. Serverless
+ * functions share no memory, which leaves the database as the only place a
+ * counter can actually be shared between them.
+ */
+export const authAttempts = pgTable(
+  "auth_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Client IP, or "unknown" when the platform gives us nothing. */
+    fingerprint: text("fingerprint").notNull(),
+    kind: text("kind").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("auth_attempts_lookup_idx").on(t.fingerprint, t.kind, t.createdAt)],
+);
+
 export const campaigns = pgTable(
   "campaigns",
   {
