@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { combatants, encounters, maps, rolls as rollsTable } from "@/db/schema";
+import { characters, combatants, encounters, maps, rolls as rollsTable } from "@/db/schema";
 import type { MapTerrain } from "@/db/schema";
 import type { DerivedAttack } from "@/rules/character";
 import { abilityModifier } from "@/rules/character";
@@ -80,6 +80,34 @@ const asState = (row: CombatantRow): CombatantState => ({
   vulnerabilities: (row.stats as CombatStats | null)?.vulnerabilities ?? [],
   isPlayerCharacter: row.characterId !== null,
 });
+
+/**
+ * Mirrors a combatant's condition back onto its character sheet.
+ *
+ * The combatant row is the authority during a fight, but the sheet is what the
+ * party panel renders and what the DM's memory projection reads. Without this
+ * write-back the two drift: a dying player shows full HP to the table, the AI
+ * is told the party is uninjured, and every wound evaporates when the encounter
+ * ends. Call this after anything that changes a combatant's hit points or
+ * death-save track.
+ */
+async function syncSheet(combatantId: string) {
+  const [row] = await db.select().from(combatants).where(eq(combatants.id, combatantId)).limit(1);
+  if (!row?.characterId) return;
+
+  await db
+    .update(characters)
+    .set({
+      hpCurrent: row.hpCurrent,
+      tempHp: row.tempHp,
+      conditions: row.conditions,
+      exhaustion: row.exhaustion,
+      deathSuccesses: row.deathSuccesses,
+      deathFailures: row.deathFailures,
+      stable: row.stable,
+    })
+    .where(eq(characters.id, row.characterId));
+}
 
 /* ------------------------------------------------------------------ *
  * Starting an encounter
@@ -425,6 +453,8 @@ export async function performAttack(params: {
         .set({ conditions: [...new Set([...target.conditions, "unconscious"])] })
         .where(eq(combatants.id, target.id));
     }
+
+    await syncSheet(target.id);
   }
 
   await db.update(combatants).set({ actionUsed: true }).where(eq(combatants.id, actor.id));
@@ -618,15 +648,17 @@ export async function performDeathSave(params: {
   encounterId: string;
   combatantId: string;
 }): Promise<{ encounter: EncounterView; roll: RollResult; result: string }> {
-  const encounter = await getEncounter(params.encounterId);
-  const actor = encounter.combatants.find((c) => c.id === params.combatantId);
-  if (!actor) throw new NotFoundError("No such combatant.");
+  // A death save is a turn's worth of action, so it is gated exactly like an
+  // attack or a move. Without this a dying client could POST repeatedly and
+  // burn the whole three-and-three track inside one round.
+  const { encounter, actor } = await requireTurn(params.encounterId, params.combatantId);
   if (actor.defeated) throw new RuleError(`${actor.name} is beyond saving.`);
   if (actor.hpCurrent > 0) throw new RuleError(`${actor.name} is still on their feet.`);
   if (actor.stable) throw new RuleError(`${actor.name} is stable and no longer rolling.`);
 
   const outcome = rollDeathSave(asState(actor));
   await db.update(combatants).set(outcome.patch).where(eq(combatants.id, actor.id));
+  await syncSheet(actor.id);
 
   await db.insert(rollsTable).values({
     campaignId: encounter.campaignId,
@@ -669,6 +701,13 @@ async function maybeEndEncounter(view: EncounterView): Promise<EncounterView> {
 
   await db.update(encounters).set({ status: "resolved" }).where(eq(encounters.id, view.id));
   const outcome = standing("party") ? "victory" : "defeat";
+
+  // Belt and braces: the sheet is already written back after every hit, but the
+  // fight is over here and the sheet is what the party carries forward, so make
+  // the invariant hold even if some future path forgets to sync.
+  for (const c of view.combatants) {
+    if (c.characterId) await syncSheet(c.id);
+  }
 
   await appendEvent(view.campaignId, "encounter.ended", {
     encounterId: view.id,
