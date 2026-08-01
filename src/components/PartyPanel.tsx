@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+import { api } from "@/lib/api";
+import { ErrorNote } from "@/components/ui";
 import { PortraitUpload } from "@/components/PortraitUpload";
 
 type Sheet = {
@@ -12,6 +15,8 @@ type Sheet = {
   tempHp: number;
   conditions: string[];
   hasPortrait?: boolean;
+  hitDiceRemaining?: number;
+  slots?: { level: number; max: number; used: number }[];
   labels: { race: string; class: string; subrace: string | null };
   derived: {
     armorClass: { value: number };
@@ -22,7 +27,15 @@ type Sheet = {
 };
 
 /** Every number here is derived server-side on read — nothing is cached in the client. */
-export function PartyPanel({ characters, meId }: { characters: Sheet[]; meId: string }) {
+export function PartyPanel({
+  characters,
+  meId,
+  onChanged,
+}: {
+  characters: Sheet[];
+  meId: string;
+  onChanged?: () => void;
+}) {
   return (
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
@@ -95,11 +108,81 @@ export function PartyPanel({ characters, meId }: { characters: Sheet[]; meId: st
                     ))}
                   </p>
                 )}
+                {isMine && <RestControls sheet={c} onChanged={onChanged} />}
               </li>
             );
           })}
         </ul>
       )}
     </section>
+  );
+}
+
+
+/**
+ * Short and long rest.
+ *
+ * The engine for both was written and tested from the start with no caller, so
+ * a party had exactly one fight in them and then the campaign was over. Hit
+ * dice roll server-side like every other die.
+ */
+function RestControls({ sheet, onChanged }: { sheet: Sheet; onChanged?: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const hurt = sheet.hpCurrent < sheet.hpMax;
+  const dice = sheet.hitDiceRemaining ?? 0;
+  const spentSlots = (sheet.slots ?? []).some((s) => s.used > 0);
+  const down = sheet.hpCurrent === 0;
+
+  const rest = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/characters/${sheet.id}/rest`, { method: "POST", json: body });
+      onChanged?.();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          data-testid="short-rest"
+          disabled={busy || down || dice === 0 || !hurt}
+          title={
+            down
+              ? "Unconscious characters cannot rest"
+              : dice === 0
+                ? "No hit dice left"
+                : !hurt
+                  ? "Already at full hit points"
+                  : `Spend one of ${dice} hit dice`
+          }
+          onClick={() => void rest({ type: "short", hitDice: 1 })}
+          className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs transition hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Short rest
+        </button>
+        <button
+          type="button"
+          data-testid="long-rest"
+          disabled={busy || down || (!hurt && !spentSlots && sheet.conditions.length === 0)}
+          onClick={() => void rest({ type: "long" })}
+          className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs transition hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Long rest
+        </button>
+        <span className="text-[10px] text-[var(--muted)] tabular">
+          {dice} hit {dice === 1 ? "die" : "dice"}
+        </span>
+      </div>
+      <ErrorNote>{error}</ErrorNote>
+    </div>
   );
 }

@@ -87,6 +87,7 @@ const DONE = [
   "Campaign generation: arc, NPCs, locations, plot threads and an opening scene",
   "Session recaps written to a campaign journal, aware of what happened in combat",
   "Levelling from XP: hit points, hit dice and spell slots at the new level",
+  "Short and long rests: hit dice spent server-side, slots and exhaustion restored",
   "Grid battle map with tap-to-move over server-validated movement",
   "Animated 3D dice that replay the roll the server already made",
   "Uploadable character portraits, resized in the browser and stored in Postgres",
@@ -96,7 +97,6 @@ const DONE = [
 ];
 
 const NEXT = [
-  "Short and long rest UI (the engine is done and tested)",
   "Async turns with a what-you-missed recap for the player who was away",
   "Rogue Expertise and Sneak Attack, Monk Martial Arts",
   "Choosing new spells on level-up — slots grow, the spell list does not",

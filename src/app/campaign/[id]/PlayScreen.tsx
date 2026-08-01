@@ -37,6 +37,9 @@ type Sheet = {
   hpMax: number;
   tempHp: number;
   conditions: string[];
+  hasPortrait?: boolean;
+  hitDiceRemaining?: number;
+  slots?: { level: number; max: number; used: number }[];
   labels: { race: string; class: string; subrace: string | null };
   derived: {
     armorClass: { value: number };
@@ -360,7 +363,11 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
               tab === "dice" || tab === "combat" || tab === "journal" || tab === "chat" ? "hidden lg:block" : ""
             }
           >
-            <PartyPanel characters={state.characters} meId={state.me.id} />
+            <PartyPanel
+              characters={state.characters}
+              meId={state.me.id}
+              onChanged={() => void refreshSide()}
+            />
           </div>
           <div
             className={
