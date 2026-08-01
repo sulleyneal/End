@@ -45,6 +45,8 @@ export type CastReport = {
   damageRoll: RollResult | null;
   results: { targetName: string; damage: number; healed: number; hpAfter: number }[];
   concentrating: boolean;
+  /** The spell's own SRD text, when the engine handed the effect to the DM. */
+  needsRuling: string | null;
   narration: string;
 };
 
@@ -187,6 +189,7 @@ export async function castSpell(params: {
     damageRoll: null,
     results: [],
     concentrating: false,
+    needsRuling: null,
     narration: "",
   };
 
@@ -265,6 +268,28 @@ export async function castSpell(params: {
         dc: caster.spellSaveDc,
       });
 
+      // Every roll is visible to the whole table (house rule 3). The target's
+      // save used to live only in the caster's HTTP response, so the dice log
+      // showed damage nobody could see had been resisted.
+      if (save.roll) {
+        await db.insert(rollsTable).values({
+          campaignId: params.campaignId,
+          encounterId: params.encounterId,
+          actorType: "combatant",
+          actorId: target.id,
+          actorName: target.name,
+          kind: "save",
+          formula: save.roll.formula,
+          dice: save.roll.dice,
+          modifier: save.roll.modifier,
+          advantage: save.advantage,
+          total: save.total,
+          targetName: spell.name,
+          dc: caster.spellSaveDc,
+          outcome: save.success ? "save" : "failed save",
+        });
+      }
+
       if (!roll) continue;
       const full = roll.total;
       const amount = save.success ? (shape.onSuccess === "half" ? Math.floor(full / 2) : 0) : full;
@@ -284,6 +309,12 @@ export async function castSpell(params: {
     if (roll) {
       for (const target of params.targets) await applyTo(target, roll.total, false);
     }
+  } else if (shape.kind === "adjudicate" || shape.kind === "utility") {
+    // The engine will not invent a number it cannot derive. The slot is spent
+    // and the cast is recorded; the effect is a ruling, which is exactly the
+    // escalation house rule 2 asks for. Silently doing nothing was worse: a
+    // player cast Bless, lost the slot, and nothing whatsoever happened.
+    report.needsRuling = spell.desc?.join("\n\n") ?? null;
   } else if (shape.kind === "heal" && healFormula) {
     const roll = rollDamage(healFormula);
     report.damageRoll = roll;
@@ -335,6 +366,7 @@ export async function castSpell(params: {
 
   const bits = [`${caster.name} casts ${spell.name}`];
   if (!spent.cantrip) bits.push(`with a level ${report.slotLevel} slot`);
+  if (report.needsRuling) bits.push("the DM rules on its effect");
   for (const result of report.results) {
     if (result.healed > 0) bits.push(`${result.targetName} regains ${result.healed} HP`);
     else if (result.damage > 0) bits.push(`${result.targetName} takes ${result.damage} damage`);

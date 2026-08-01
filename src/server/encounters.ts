@@ -21,7 +21,7 @@ import { selfAreaFt } from "@/rules/spells";
 import type { RollResult } from "@/rules/dice";
 import { srd } from "@/srd/local";
 import { listCharacters } from "./characters";
-import { appendEvent } from "./events";
+import { appendEvent, postMessage } from "./events";
 import { NotFoundError, RuleError } from "./http";
 import { type CombatStats, monsterArmorClass, monsterCombatStats, monsterHitPoints } from "./monsters";
 import { type CastReport, castSpell, knownSpells, slotsFor } from "./casting";
@@ -370,11 +370,25 @@ export async function getEncounter(encounterId: string): Promise<EncounterView> 
     }
   }
 
+  // The turn pointer skips the dead rather than resting on them.
+  //
+  // It used to be `view[turnIndex]` flat, so a character who died on their own
+  // turn became the active combatant forever: requireTurn rejects a defeated
+  // actor, so they could not end their turn, nobody else could act out of turn,
+  // and the one-active-encounter rule meant the campaign could never fight
+  // again. Dying is the outcome the death-save system exists to produce, so it
+  // must not be the thing that ends the game.
   const living = view.filter((c) => !c.defeated);
-  const active =
-    encounter.status === "active" && living.length > 0
-      ? (view[encounter.turnIndex % view.length]?.id ?? null)
-      : null;
+  let active: string | null = null;
+  if (encounter.status === "active" && living.length > 0 && view.length > 0) {
+    for (let step = 0; step < view.length; step++) {
+      const candidate = view[(encounter.turnIndex + step) % view.length];
+      if (candidate && !candidate.defeated) {
+        active = candidate.id;
+        break;
+      }
+    }
+  }
 
   const [mapRow] = encounter.mapId
     ? await db.select().from(maps).where(eq(maps.id, encounter.mapId)).limit(1)
@@ -786,18 +800,23 @@ export async function performDeathSave(params: {
   if (actor.defeated) throw new RuleError(`${actor.name} is beyond saving.`);
   if (actor.hpCurrent > 0) throw new RuleError(`${actor.name} is still on their feet.`);
   if (actor.stable) throw new RuleError(`${actor.name} is stable and no longer rolling.`);
-  // One death save per turn. Without this a client can spam the route and farm
-  // the three-and-three track — stopping at two successes, or fishing for the
-  // natural 20 that revives at 1 HP.
-  if (actor.actionUsed) {
+
+  // One death save per turn, claimed atomically. Reading actionUsed and writing
+  // it afterwards left a window in which eight parallel requests each rolled a
+  // fresh d20 and the last write won — four failures rolled, none retained, and
+  // a natural 20 fished out to stand back up at 1 HP.
+  const claimedSave = await db
+    .update(combatants)
+    .set({ actionUsed: true })
+    .where(and(eq(combatants.id, actor.id), eq(combatants.actionUsed, false)))
+    .returning({ id: combatants.id });
+
+  if (claimedSave.length === 0) {
     throw new RuleError(`${actor.name} has already rolled a death save this turn.`);
   }
 
   const outcome = rollDeathSave(asState(actor));
-  await db
-    .update(combatants)
-    .set({ ...outcome.patch, actionUsed: true })
-    .where(eq(combatants.id, actor.id));
+  await db.update(combatants).set(outcome.patch).where(eq(combatants.id, actor.id));
   await syncSheet(actor.id);
 
   await db.insert(rollsTable).values({
@@ -940,6 +959,22 @@ export async function castSpellAction(params: {
   // Damage from a spell moves hit points, so the sheets follow.
   for (const target of targets) await syncSheet(target.id);
   await syncSheet(actor.id);
+
+  // A spell the engine would not resolve reaches the table as a ruling card,
+  // clearly marked as the DM deciding rather than the rules computing.
+  if (cast.needsRuling) {
+    await postMessage({
+      campaignId: encounter.campaignId,
+      authorType: "system",
+      authorName: "Dungeon Master",
+      kind: "ruling",
+      content: cast.needsRuling,
+      metadata: {
+        question: `${actor.name} casts ${cast.spellName}. What happens?`,
+        mechanic: "The engine does not resolve this spell; the DM adjudicates it.",
+      },
+    });
+  }
 
   const updated = await maybeEndEncounter(await getEncounter(params.encounterId));
   return { encounter: updated, cast };

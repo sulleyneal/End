@@ -17,8 +17,10 @@ export type SpellShape =
   | { kind: "attack"; attackType: "melee" | "ranged" }
   | { kind: "save"; ability: string; onSuccess: "none" | "half" | "other" }
   | { kind: "heal" }
-  /** Damage that simply lands: Magic Missile, Scorching Ray, Sleep. */
+  /** Damage that simply lands, with no attack roll and no save: Magic Missile. */
   | { kind: "auto" }
+  /** The engine will not guess; the DM rules on it. */
+  | { kind: "adjudicate" }
   | { kind: "utility" };
 
 export class SpellError extends Error {}
@@ -61,14 +63,54 @@ export function shapeOf(spell: SrdSpell): SpellShape {
     };
   }
   if (spell.heal_at_slot_level) return { kind: "heal" };
-  // A spell with damage but neither an attack roll nor a save hits automatically.
-  // Ten SRD spells are shaped this way, including Magic Missile and Scorching
-  // Ray; treating them as utility meant they spent a slot and did nothing.
+
+  // Ten SRD spells carry damage dice with no `attack_type` and no `dc`. Exactly
+  // one of them — Magic Missile — actually hits automatically. For the rest the
+  // structured fields are incomplete: their description states an attack or a
+  // save that the machine-readable fields omit, and Sleep's dice are not damage
+  // at all but the pool of hit points it puts to sleep. Treating the whole set
+  // as auto-damage turned Sleep into a 5d8 force nuke that beat Fireball.
+  //
+  // See SHAPE_FROM_DESCRIPTION for how each is classified from the SRD text.
   if (spell.damage?.damage_at_slot_level || spell.damage?.damage_at_character_level) {
+    const override = SHAPE_FROM_DESCRIPTION[spell.index];
+    if (override) return override;
     return { kind: "auto" };
   }
   return { kind: "utility" };
 }
+
+/**
+ * Spells whose mechanics are in the SRD `desc` but not in its structured fields.
+ *
+ * Every entry is justified by that spell's own description in the vendored
+ * data, quoted below. Nothing here is invented: it is the same prose-to-number
+ * split the conditions and traits modules make, applied to the handful of
+ * spells the dataset under-describes.
+ *
+ * `adjudicate` means the engine will not guess. It spends the slot, records the
+ * cast, and hands the DM a ruling — house rule 2's escalation path — rather than
+ * inventing a number the rules do not support.
+ */
+const SHAPE_FROM_DESCRIPTION: Record<string, SpellShape> = {
+  // "roll 5d8; the total is how many hit points of creatures this spell can
+  // affect" — a pool, not damage, and the SRD gives it no damage_type at all.
+  sleep: { kind: "adjudicate" },
+  // "each creature ... must make a Dexterity saving throw ... half as much on a
+  // successful one"
+  "call-lightning": { kind: "save", ability: "dex", onSuccess: "half" },
+  "flaming-sphere": { kind: "save", ability: "dex", onSuccess: "half" },
+  // "Make a ranged spell attack for each ray." The engine resolves one attack,
+  // so three rays go to the DM rather than being quietly under-resolved.
+  "scorching-ray": { kind: "adjudicate" },
+  // Damage only on a specific contingency (teleporting into an occupied space).
+  "dimension-door": { kind: "adjudicate" },
+  // Self-range buffs: the dice apply to future weapon hits, not to a target now.
+  "branding-smite": { kind: "adjudicate" },
+  "divine-favor": { kind: "adjudicate" },
+  "fire-shield": { kind: "adjudicate" },
+  "flame-blade": { kind: "adjudicate" },
+};
 
 /** Cantrips scale with character level at 1st, 5th, 11th and 17th (PHB). */
 export function cantripTier(characterLevel: number): number {

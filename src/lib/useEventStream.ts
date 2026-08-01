@@ -27,7 +27,18 @@ export function useEventStream(
   options: { since?: number } = {},
 ) {
   const [status, setStatus] = useState<StreamStatus>("connecting");
-  const cursor = useRef(options.since ?? 0);
+
+  // The cursor starts where /state left off. It used to initialise from a
+  // `since` that was still undefined on first render — the initial fetch had
+  // not resolved — so it opened at 0 and replayed the campaign's entire event
+  // log on every page load. Each replayed event triggered a full state refetch:
+  // 182 requests in seven seconds on a campaign with 700 events, growing
+  // without bound, and busy enough that live events never got through.
+  const cursor = useRef<number | null>(null);
+  if (cursor.current === null && options.since !== undefined) {
+    cursor.current = options.since;
+  }
+  const ready = cursor.current !== null;
   // Keep the latest handler without re-opening the stream on every render.
   // Assigning during render would be a side effect in the render phase.
   const handler = useRef(onEvent);
@@ -36,6 +47,9 @@ export function useEventStream(
   });
 
   useEffect(() => {
+    // Nothing to resume from yet; the initial state fetch is still in flight.
+    if (!ready) return;
+
     let source: EventSource | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
@@ -43,7 +57,7 @@ export function useEventStream(
     const connect = () => {
       if (closed) return;
       source = new EventSource(
-        `/api/campaigns/${campaignId}/stream?since=${cursor.current}`,
+        `/api/campaigns/${campaignId}/stream?since=${cursor.current ?? 0}`,
       );
 
       source.onopen = () => setStatus("live");
@@ -87,7 +101,7 @@ export function useEventStream(
       if (retry) clearTimeout(retry);
       source?.close();
     };
-  }, [campaignId]);
+  }, [campaignId, ready]);
 
   return { status, cursor };
 }

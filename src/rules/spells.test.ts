@@ -41,10 +41,37 @@ describe("spell shape", () => {
   });
 
   it("reads Magic Missile as damage that simply lands", () => {
-    // No attack roll and no save: the darts always hit. Shaping this as
-    // utility made it spend a slot and deal nothing.
+    // No attack roll and no save: the darts always hit.
     expect(shapeOf(srdGet.spell("magic-missile")).kind).toBe("auto");
-    expect(shapeOf(srdGet.spell("scorching-ray")).kind).toBe("auto");
+  });
+
+  it("does not treat Sleep's dice as damage", () => {
+    // 5d8 is the pool of hit points Sleep affects, not damage — and the SRD
+    // gives it no damage type at all. Reading it as auto-damage made a level-1
+    // Sleep average 22.5 damage, more per slot than Fireball.
+    expect(shapeOf(srdGet.spell("sleep")).kind).toBe("adjudicate");
+    expect(srdGet.spell("sleep").damage?.damage_type).toBeUndefined();
+  });
+
+  it("gives Call Lightning and Flaming Sphere the save their text states", () => {
+    expect(shapeOf(srdGet.spell("call-lightning"))).toEqual({
+      kind: "save",
+      ability: "dex",
+      onSuccess: "half",
+    });
+    expect(shapeOf(srdGet.spell("flaming-sphere"))).toEqual({
+      kind: "save",
+      ability: "dex",
+      onSuccess: "half",
+    });
+  });
+
+  it("sends multi-ray and buff spells to the DM rather than guessing", () => {
+    // Scorching Ray is three separate attacks; the Self-range smites apply to
+    // future weapon hits. Auto-resolving either invents a number.
+    for (const index of ["scorching-ray", "divine-favor", "branding-smite", "flame-blade"]) {
+      expect(shapeOf(srdGet.spell(index)).kind).toBe("adjudicate");
+    }
   });
 
   it("still reads a genuinely effectless spell as utility", () => {

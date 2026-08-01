@@ -102,6 +102,9 @@ const NEXT = [
   "Choosing new spells on level-up — slots grow, the spell list does not",
   "Halfling Lucky, cover, monster condition immunities and dragonborn breath are unimplemented",
   "Session recaps are written when a co-DM ends the session, not automatically",
+  "Ability Score Improvements at levels 4, 8, 12, 16 and 19 are not applied",
+  "Players can read a monster's full stat block from the encounter payload",
+  "Conditions applied by the DM have no duration and no expiry",
   "Ranged attacks in melee do not yet take disadvantage",
   "Battle maps have no walls or difficult terrain yet — the engine enforces both, nothing authors them",
 ];

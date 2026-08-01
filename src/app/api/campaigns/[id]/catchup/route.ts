@@ -48,15 +48,18 @@ export const GET = route(async (_req: Request, ctx: RouteContext<"/api/campaigns
     .limit(200);
 
   const narrative = rows.filter((m) => m.kind !== "ooc" && m.kind !== "system");
-  await markSeen();
 
   if (narrative.length < WORTH_SUMMARISING || !isAiConfigured()) {
+    await markSeen();
     return Response.json({ missed: null, count: narrative.length });
   }
 
+  // Marked seen only once the summary exists. Marking first meant a failed AI
+  // call, or a second tab racing the first, consumed the catch-up and lost it.
   const summary = await summariseMissed(
     narrative.map((m) => `${m.authorName} (${m.kind}): ${m.content}`),
   );
+  await markSeen();
 
   return Response.json({
     missed: summary ? { summary, count: narrative.length, since: since.toISOString() } : null,

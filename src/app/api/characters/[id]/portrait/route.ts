@@ -35,6 +35,11 @@ export const GET = route(async (_req: Request, ctx: RouteContext<"/api/character
   return new Response(new Uint8Array(row.portrait), {
     headers: {
       "content-type": row.mime ?? "image/png",
+      // Without nosniff a browser may sniff stored bytes as HTML and execute
+      // them from this origin. Portraits are user-supplied, so say what they
+      // are and refuse to let the browser guess otherwise.
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; sandbox",
       // Immutable per upload; a new portrait lands on a fresh URL via ?v=.
       "cache-control": "private, max-age=3600",
     },
@@ -70,6 +75,16 @@ export const PUT = route(async (request: Request, ctx: RouteContext<"/api/charac
     );
   }
 
+  // A declared content-type is just a claim. Check the bytes actually begin
+  // like the image they say they are, so HTML or a script cannot be stored
+  // under an image label.
+  if (!looksLikeImage(bytes)) {
+    return Response.json(
+      { error: "That file is not a PNG, JPEG or WebP image." },
+      { status: 415 },
+    );
+  }
+
   await db
     .update(characters)
     .set({ portrait: Buffer.from(bytes), portraitMime: mime })
@@ -77,3 +92,18 @@ export const PUT = route(async (request: Request, ctx: RouteContext<"/api/charac
 
   return Response.json({ ok: true, bytes: bytes.byteLength });
 });
+
+
+/** PNG, JPEG and WebP magic bytes. */
+function looksLikeImage(bytes: Uint8Array): boolean {
+  if (bytes.length < 12) return false;
+  const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (png.every((b, i) => bytes[i] === b)) return true;
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return true;
+  const riff = [0x52, 0x49, 0x46, 0x46];
+  const webp = [0x57, 0x45, 0x42, 0x50];
+  if (riff.every((b, i) => bytes[i] === b) && webp.every((b, i) => bytes[8 + i] === b)) {
+    return true;
+  }
+  return false;
+}

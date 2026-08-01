@@ -7,6 +7,7 @@ import { getCharacterSheet } from "@/server/characters";
 import { appendEvent, postMessage } from "@/server/events";
 import { readJson, route } from "@/server/http";
 import { srdGet } from "@/srd/local";
+import { getActiveEncounter } from "@/server/encounters";
 import { takeLongRest, takeShortRest } from "@/rules/rest";
 
 /**
@@ -34,14 +35,28 @@ export const POST = route(async (request: Request, ctx: RouteContext<"/api/chara
   if (sheet.userId !== user.id) {
     return Response.json({ error: "That is not your character." }, { status: 403 });
   }
-  if (sheet.hpCurrent === 0) {
+  // No resting mid-fight. Without this a caster could long-rest on their own
+  // turn, refill every slot, and keep casting — unlimited spell slots inside a
+  // single encounter.
+  const fight = await getActiveEncounter(sheet.campaignId);
+  if (fight?.combatants.some((c) => c.characterId === id && !c.defeated)) {
     return Response.json(
-      { error: `${sheet.name} is unconscious and cannot rest.` },
+      { error: `${sheet.name} is in a fight and cannot rest.` },
       { status: 400 },
     );
   }
 
   const body = restSchema.parse(await readJson(request));
+
+  // A short rest needs you conscious to spend hit dice. A long rest is how a
+  // downed character comes back — out of combat there is no other way to heal
+  // them, so refusing it stranded them at 0 HP for the rest of the campaign.
+  if (sheet.hpCurrent === 0 && body.type === "short") {
+    return Response.json(
+      { error: `${sheet.name} is unconscious and cannot take a short rest.` },
+      { status: 400 },
+    );
+  }
   const classDoc = srdGet.class(sheet.class);
 
   const resting = {

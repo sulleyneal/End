@@ -18,7 +18,11 @@ import { readJson, route } from "@/server/http";
 
 export const runtime = "nodejs";
 
-const chatSchema = z.object({ content: z.string().min(1).max(2000) });
+// Trim before the length check, or a message of spaces passes min(1) and is
+// stored as an empty line.
+const chatSchema = z.object({
+  content: z.string().max(2000).transform((v) => v.trim()).pipe(z.string().min(1)),
+});
 
 export const GET = route(async (_req: Request, ctx: RouteContext<"/api/campaigns/[id]/chat">) => {
   const { id } = await ctx.params;
@@ -51,7 +55,7 @@ export const POST = route(async (request: Request, ctx: RouteContext<"/api/campa
     authorType: "player",
     authorName: user.displayName,
     kind: "ooc",
-    content: content.trim(),
+    content,
   });
 
   return Response.json({ id: messageId }, { status: 201 });
