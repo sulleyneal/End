@@ -48,6 +48,14 @@ export type SrdOption = {
   count?: number;
   of?: SrdRef;
   choice?: SrdChoice;
+  /** Present on `multiple` options: a bundle granted together. */
+  items?: SrdOption[];
+};
+
+export type SrdEquipmentCategory = {
+  index: string;
+  name: string;
+  equipment: SrdRef[];
 };
 
 export type SrdRace = {

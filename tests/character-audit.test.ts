@@ -6,7 +6,8 @@ import {
   type DeriveContext,
   deriveCharacter,
 } from "@/rules/character";
-import { buildLevel1Character } from "@/rules/build";
+import { buildLevel1Character, skillOptionsFor } from "@/rules/build";
+import { equipmentChoicesFor } from "@/rules/equipment";
 import { srd, srdGet } from "@/srd/local";
 import { ABILITIES, type AbilityKey } from "@/srd/types";
 
@@ -532,13 +533,23 @@ describe("attacks", () => {
 });
 
 describe("level-1 construction", () => {
+  const categories = srd.equipmentCategories();
+
+  /** Takes the first branch of every equipment block, with the first legal sub-pick. */
+  const firstLegalKit = (classIndex: string) =>
+    equipmentChoicesFor(srdGet.class(classIndex), categories).map((block) => ({
+      block: block.block,
+      option: 0,
+      picks: block.options[0].picks.map((pick) => pick.from[0]),
+    }));
+
+  const skillPicksFor = (classDoc: ReturnType<typeof srdGet.class>) => {
+    const block = skillOptionsFor(classDoc);
+    return block ? block.options.slice(0, block.choose) : [];
+  };
+
   it.each(CLASSES)("%s builds legally with the standard array", (classIndex) => {
     const classDoc = srdGet.class(classIndex);
-    const skillBlock = (classDoc.proficiency_choices ?? [])[0];
-    const skillPicks = (skillBlock?.from.options ?? [])
-      .map((o) => o.item?.index)
-      .filter((i): i is string => Boolean(i?.startsWith("skill-")))
-      .slice(0, skillBlock?.choose ?? 0);
 
     const built = buildLevel1Character(
       {
@@ -547,14 +558,26 @@ describe("level-1 construction", () => {
         raceIndex: "human",
         scores: { str: 15, dex: 14, con: 13, int: 12, wis: 10, cha: 8 },
         scoreMethod: "standard-array",
-        skillChoices: skillPicks,
+        skillChoices: skillPicksFor(classDoc),
+        equipmentSelections: firstLegalKit(classIndex),
       },
       {
         classDoc,
         raceDoc: srdGet.race("human"),
         levelDoc: srdGet.level(classIndex, 1),
+        equipmentCategories: categories,
+        equipmentDocs: srd.equipment(),
       },
     );
+
+    // Every class walks away with a kit, and any armour in it is worn.
+    expect(built.items.length).toBeGreaterThan(0);
+    const equipmentDocs = srd.equipment();
+    for (const item of built.items) {
+      const doc = equipmentDocs.find((e) => e.index === item.itemIndex);
+      expect(doc, `unknown item ${item.itemIndex}`).toBeDefined();
+      expect(item.equipped).toBe(doc!.armor_category !== undefined);
+    }
 
     const entry = CLASS_TABLE[classIndex];
     // Human adds +1 Con, so 13 -> 14 -> modifier +2.

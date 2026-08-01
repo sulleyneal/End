@@ -3,12 +3,15 @@ import {
   type AbilityKey,
   type SrdChoice,
   type SrdClass,
+  type SrdEquipment,
+  type SrdEquipmentCategory,
   type SrdLevel,
   type SrdOption,
   type SrdRace,
   type SrdSubrace,
 } from "@/srd/types";
 import { abilityModifier } from "./character";
+import { type EquipmentSelection, resolveStartingEquipment } from "./equipment";
 
 /**
  * Legal character construction.
@@ -129,8 +132,8 @@ export type BuildRequest = {
   skillChoices: string[];
   /** Proficiency indexes chosen from the race's choice block, when it has one. */
   raceProficiencyChoices?: string[];
-  /** Equipment indexes to start with, on top of the class's fixed kit. */
-  equipmentChoices?: string[];
+  /** One branch per class starting-equipment block. */
+  equipmentSelections?: EquipmentSelection[];
 };
 
 export type BuiltCharacter = {
@@ -171,6 +174,10 @@ export type BuildContext = {
   raceDoc: SrdRace;
   subraceDoc?: SrdSubrace | null;
   levelDoc?: SrdLevel | null;
+  /** Needed to resolve "a martial weapon" style equipment choices. */
+  equipmentCategories?: Pick<SrdEquipmentCategory, "index" | "equipment">[];
+  /** Armour lookup, so the starting kit can be worn rather than carried. */
+  equipmentDocs?: Pick<SrdEquipment, "index" | "armor_category">[];
 };
 
 /**
@@ -242,13 +249,22 @@ export function buildLevel1Character(
   // Level 1 HP is the maximum hit die plus the Constitution modifier (PHB 12).
   const hpMax = Math.max(1, ctx.classDoc.hit_die + conMod);
 
-  const items: BuiltCharacter["items"] = [];
-  for (const entry of ctx.classDoc.starting_equipment ?? []) {
-    items.push({ itemIndex: entry.equipment.index, quantity: entry.quantity, equipped: false });
-  }
-  for (const index of request.equipmentChoices ?? []) {
-    items.push({ itemIndex: index, quantity: 1, equipped: false });
-  }
+  // Starting kit: the class's fixed items plus one resolved branch per choice
+  // block. Armour and shields come out worn — they are the point of choosing
+  // them — while weapons stay in the pack until the player draws one.
+  const resolved = resolveStartingEquipment(
+    ctx.classDoc,
+    request.equipmentSelections ?? [],
+    ctx.equipmentCategories ?? [],
+  );
+  const armorCategory = new Map(
+    (ctx.equipmentDocs ?? []).map((doc) => [doc.index, doc.armor_category]),
+  );
+  const items: BuiltCharacter["items"] = resolved.map((item) => ({
+    itemIndex: item.itemIndex,
+    quantity: item.quantity,
+    equipped: armorCategory.get(item.itemIndex) !== undefined,
+  }));
 
   const spellSlots: BuiltCharacter["spellSlots"] = [];
   const casting = ctx.levelDoc?.spellcasting;
