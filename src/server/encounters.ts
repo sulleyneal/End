@@ -347,7 +347,20 @@ export async function getActiveEncounter(campaignId: string): Promise<EncounterV
  * Turn gating
  * ------------------------------------------------------------------ */
 
-async function requireTurn(encounterId: string, combatantId: string) {
+/**
+ * Gates an action on it being this combatant's turn.
+ *
+ * `allowIncapacitated` exists because an unconscious creature still *has* a
+ * turn — it makes a death save and passes. Blocking incapacitated actors from
+ * ending their own turn deadlocks the encounter permanently the first time
+ * anyone drops to 0 HP, since nothing else can advance the pointer past them.
+ * Only rolling a death save and ending the turn may set it.
+ */
+async function requireTurn(
+  encounterId: string,
+  combatantId: string,
+  options: { allowIncapacitated?: boolean } = {},
+) {
   const encounter = await getEncounter(encounterId);
   if (encounter.status !== "active") throw new RuleError("This encounter is not running.");
   if (encounter.activeCombatantId !== combatantId) {
@@ -358,7 +371,10 @@ async function requireTurn(encounterId: string, combatantId: string) {
   const actor = encounter.combatants.find((c) => c.id === combatantId);
   if (!actor) throw new NotFoundError("No such combatant.");
   if (actor.defeated) throw new RuleError(`${actor.name} is out of the fight.`);
-  if (!canTakeActions({ conditions: actor.conditions, exhaustion: actor.exhaustion })) {
+  if (
+    !options.allowIncapacitated &&
+    !canTakeActions({ conditions: actor.conditions, exhaustion: actor.exhaustion })
+  ) {
     throw new RuleError(`${actor.name} is incapacitated and cannot act.`);
   }
 
@@ -605,7 +621,9 @@ export async function moveCombatant(params: {
  * ------------------------------------------------------------------ */
 
 export async function endTurn(encounterId: string, combatantId: string): Promise<EncounterView> {
-  const { encounter, actor } = await requireTurn(encounterId, combatantId);
+  const { encounter, actor } = await requireTurn(encounterId, combatantId, {
+    allowIncapacitated: true,
+  });
 
   // Reset the outgoing combatant's economy.
   await db
@@ -651,13 +669,24 @@ export async function performDeathSave(params: {
   // A death save is a turn's worth of action, so it is gated exactly like an
   // attack or a move. Without this a dying client could POST repeatedly and
   // burn the whole three-and-three track inside one round.
-  const { encounter, actor } = await requireTurn(params.encounterId, params.combatantId);
+  const { encounter, actor } = await requireTurn(params.encounterId, params.combatantId, {
+    allowIncapacitated: true,
+  });
   if (actor.defeated) throw new RuleError(`${actor.name} is beyond saving.`);
   if (actor.hpCurrent > 0) throw new RuleError(`${actor.name} is still on their feet.`);
   if (actor.stable) throw new RuleError(`${actor.name} is stable and no longer rolling.`);
+  // One death save per turn. Without this a client can spam the route and farm
+  // the three-and-three track — stopping at two successes, or fishing for the
+  // natural 20 that revives at 1 HP.
+  if (actor.actionUsed) {
+    throw new RuleError(`${actor.name} has already rolled a death save this turn.`);
+  }
 
   const outcome = rollDeathSave(asState(actor));
-  await db.update(combatants).set(outcome.patch).where(eq(combatants.id, actor.id));
+  await db
+    .update(combatants)
+    .set({ ...outcome.patch, actionUsed: true })
+    .where(eq(combatants.id, actor.id));
   await syncSheet(actor.id);
 
   await db.insert(rollsTable).values({

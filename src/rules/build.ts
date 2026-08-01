@@ -177,7 +177,10 @@ export type BuildContext = {
   /** Needed to resolve "a martial weapon" style equipment choices. */
   equipmentCategories?: Pick<SrdEquipmentCategory, "index" | "equipment">[];
   /** Armour lookup, so the starting kit can be worn rather than carried. */
-  equipmentDocs?: Pick<SrdEquipment, "index" | "armor_category">[];
+  equipmentDocs?: Pick<
+    SrdEquipment,
+    "index" | "armor_category" | "equipment_category" | "weapon_range"
+  >[];
 };
 
 /**
@@ -250,21 +253,43 @@ export function buildLevel1Character(
   const hpMax = Math.max(1, ctx.classDoc.hit_die + conMod);
 
   // Starting kit: the class's fixed items plus one resolved branch per choice
-  // block. Armour and shields come out worn — they are the point of choosing
-  // them — while weapons stay in the pack until the player draws one.
+  // block. Armour and shields come out worn, and the character draws one melee
+  // and one ranged weapon.
+  //
+  // Leaving every weapon sheathed is what a cautious reading of "in the pack"
+  // implies, but attacks are derived only from equipped weapons — so a fighter
+  // who starts with a battleaxe in the pack has no attacks at all, and there is
+  // no draw-weapon control for them to fix it with. A character arrives at the
+  // table ready to fight.
   const resolved = resolveStartingEquipment(
     ctx.classDoc,
     request.equipmentSelections ?? [],
     ctx.equipmentCategories ?? [],
   );
-  const armorCategory = new Map(
-    (ctx.equipmentDocs ?? []).map((doc) => [doc.index, doc.armor_category]),
-  );
-  const items: BuiltCharacter["items"] = resolved.map((item) => ({
-    itemIndex: item.itemIndex,
-    quantity: item.quantity,
-    equipped: armorCategory.get(item.itemIndex) !== undefined,
-  }));
+  const docsByIndex = new Map((ctx.equipmentDocs ?? []).map((doc) => [doc.index, doc]));
+
+  let meleeDrawn = false;
+  let rangedDrawn = false;
+  const items: BuiltCharacter["items"] = resolved.map((item) => {
+    const doc = docsByIndex.get(item.itemIndex);
+
+    if (doc?.armor_category !== undefined) {
+      return { itemIndex: item.itemIndex, quantity: item.quantity, equipped: true };
+    }
+
+    if (doc?.equipment_category?.index === "weapon") {
+      if (doc.weapon_range === "Melee" && !meleeDrawn) {
+        meleeDrawn = true;
+        return { itemIndex: item.itemIndex, quantity: item.quantity, equipped: true };
+      }
+      if (doc.weapon_range === "Ranged" && !rangedDrawn) {
+        rangedDrawn = true;
+        return { itemIndex: item.itemIndex, quantity: item.quantity, equipped: true };
+      }
+    }
+
+    return { itemIndex: item.itemIndex, quantity: item.quantity, equipped: false };
+  });
 
   const spellSlots: BuiltCharacter["spellSlots"] = [];
   const casting = ctx.levelDoc?.spellcasting;

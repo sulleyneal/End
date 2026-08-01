@@ -20,7 +20,11 @@ const createSchema = z.object({
   background: z.string().max(60).optional(),
   alignment: z.string().max(40).optional(),
   scores,
-  scoreMethod: z.enum(["standard-array", "point-buy", "manual"]),
+  // "manual" is deliberately not accepted here. It skips every budget check in
+  // validateAbilityScores, so a tampered client could post six 18s and sit at
+  // the table beside standard-array characters. The builder never offers it;
+  // it stays an internal method for fixtures and DM-authored NPCs.
+  scoreMethod: z.enum(["standard-array", "point-buy"]),
   skillChoices: z.array(z.string().max(60)).max(6).default([]),
   raceProficiencyChoices: z.array(z.string().max(60)).max(6).optional(),
   equipmentSelections: z

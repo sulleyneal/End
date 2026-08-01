@@ -570,13 +570,46 @@ describe("level-1 construction", () => {
       },
     );
 
-    // Every class walks away with a kit, and any armour in it is worn.
+    // Every class walks away with a kit. Armour is worn, and the character has
+    // drawn at most one melee and one ranged weapon — enough to fight with,
+    // never two swords in one hand.
     expect(built.items.length).toBeGreaterThan(0);
     const equipmentDocs = srd.equipment();
+    let meleeEquipped = 0;
+    let rangedEquipped = 0;
+
     for (const item of built.items) {
       const doc = equipmentDocs.find((e) => e.index === item.itemIndex);
       expect(doc, `unknown item ${item.itemIndex}`).toBeDefined();
-      expect(item.equipped).toBe(doc!.armor_category !== undefined);
+
+      const isArmor = doc!.armor_category !== undefined;
+      const isWeapon = doc!.equipment_category?.index === "weapon";
+
+      if (isArmor) {
+        expect(item.equipped, `${item.itemIndex} should be worn`).toBe(true);
+      } else if (!isWeapon) {
+        expect(item.equipped, `${item.itemIndex} is not wearable or wieldable`).toBe(false);
+      }
+
+      if (item.equipped && isWeapon) {
+        if (doc!.weapon_range === "Melee") meleeEquipped++;
+        else rangedEquipped++;
+      }
+    }
+
+    expect(meleeEquipped).toBeLessThanOrEqual(1);
+    expect(rangedEquipped).toBeLessThanOrEqual(1);
+
+    // The regression that mattered: a starting kit with a weapon in it must
+    // produce a usable attack, or the character reaches the table unable to
+    // swing at anything and the combat UI offers no attack buttons at all.
+    const startsWithWeapon = built.items.some(
+      (item) =>
+        equipmentDocs.find((e) => e.index === item.itemIndex)?.equipment_category?.index ===
+        "weapon",
+    );
+    if (startsWithWeapon) {
+      expect(meleeEquipped + rangedEquipped, `${classIndex} drew no weapon`).toBeGreaterThan(0);
     }
 
     const entry = CLASS_TABLE[classIndex];
