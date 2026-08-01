@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { and, asc, desc, eq, gt } from "drizzle-orm";
 import { db } from "@/db";
-import { messages, sessionLogs } from "@/db/schema";
+import { encounters, messages, rolls, sessionLogs } from "@/db/schema";
 import { appendEvent, postMessage } from "@/server/events";
 import { PARSER_MODEL, anthropic } from "./client";
 
@@ -85,6 +85,34 @@ export async function endSessionWithRecap(campaignId: string): Promise<{
   const playable = transcript.filter((m) => m.kind !== "ooc" && m.kind !== "system");
   if (playable.length < 2) return null;
 
+  // Combat writes to `rolls`, not to `messages`, so a recap built from the
+  // story log alone described only what the AI narrated and nothing about the
+  // fight the party actually had. Feed it the mechanical record too.
+  const [combatRolls, fights] = await Promise.all([
+    db
+      .select()
+      .from(rolls)
+      .where(and(eq(rolls.campaignId, campaignId), gt(rolls.createdAt, since)))
+      .orderBy(asc(rolls.createdAt))
+      .limit(300),
+    db
+      .select()
+      .from(encounters)
+      .where(and(eq(encounters.campaignId, campaignId), gt(encounters.createdAt, since)))
+      .orderBy(asc(encounters.createdAt))
+      .limit(10),
+  ]);
+
+  const mechanical = combatRolls
+    .filter((r) => ["attack", "damage", "death_save", "save"].includes(r.kind))
+    .map((r) => {
+      const target = r.targetName ? ` vs ${r.targetName}` : "";
+      const outcome = r.outcome ? ` — ${r.outcome}` : "";
+      return `${r.actorName}: ${r.kind}${target} ${r.total}${outcome}`;
+    })
+    .join("\n")
+    .slice(0, 12000);
+
   const rendered = playable
     .map((m) => `${m.authorName} (${m.kind}): ${m.content}`)
     .join("\n\n")
@@ -96,7 +124,22 @@ export async function endSessionWithRecap(campaignId: string): Promise<{
     system: SYSTEM_PROMPT,
     tools: [RECAP_TOOL],
     tool_choice: { type: "tool", name: "write_recap" },
-    messages: [{ role: "user", content: `Session log:\n\n${rendered}` }],
+    messages: [
+      {
+        role: "user",
+        content: [
+          `Session log:\n\n${rendered}`,
+          fights.length > 0
+            ? `\n\nEncounters this session: ${fights
+                .map((f) => `${f.name} (${f.status}, ${f.round} rounds)`)
+                .join("; ")}`
+            : "",
+          mechanical
+            ? `\n\nDice record — use this for what happened in combat, but write it as story, never as numbers:\n${mechanical}`
+            : "",
+        ].join(""),
+      },
+    ],
   });
 
   const call = response.content.find(

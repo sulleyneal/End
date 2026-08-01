@@ -18,10 +18,13 @@ export const GET = route(async (_req: Request, ctx: RouteContext<"/api/character
 export const PATCH = route(async (request: Request, ctx: RouteContext<"/api/characters/[id]">) => {
   const { id } = await ctx.params;
   const sheet = await getCharacterSheet(id);
-  const { user, membership } = await requireMembership(sheet.campaignId);
+  const { user } = await requireMembership(sheet.campaignId);
 
-  // A player may only re-equip their own character; a co-DM may adjust anyone's.
-  if (sheet.userId !== user.id && membership.role !== "co_dm") {
+  // Only the owner. A co-DM used to be allowed here, and since whoever creates
+  // a table is a co-DM by default — usually just another player — that let them
+  // strip a friend's armour mid-fight and drop their AC by four. Running the
+  // monsters does not include reaching into someone else's kit.
+  if (sheet.userId !== user.id) {
     return Response.json({ error: "That is not your character." }, { status: 403 });
   }
 

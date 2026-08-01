@@ -39,6 +39,17 @@ describe("spell shape", () => {
   it("reads Cure Wounds as healing", () => {
     expect(shapeOf(srdGet.spell("cure-wounds")).kind).toBe("heal");
   });
+
+  it("reads Magic Missile as damage that simply lands", () => {
+    // No attack roll and no save: the darts always hit. Shaping this as
+    // utility made it spend a slot and deal nothing.
+    expect(shapeOf(srdGet.spell("magic-missile")).kind).toBe("auto");
+    expect(shapeOf(srdGet.spell("scorching-ray")).kind).toBe("auto");
+  });
+
+  it("still reads a genuinely effectless spell as utility", () => {
+    expect(shapeOf(srdGet.spell("mage-hand")).kind).toBe("utility");
+  });
 });
 
 describe("ranges", () => {

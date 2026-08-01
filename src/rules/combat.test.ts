@@ -463,3 +463,50 @@ describe("rollWeaponDamage", () => {
     expect(packet.amount).toBe(18);
   });
 });
+
+describe("dropping to 0 HP", () => {
+  const pc = (over: Partial<CombatantState> = {}): CombatantState => ({
+    name: "Bram",
+    hpCurrent: 7,
+    hpMax: 7,
+    tempHp: 0,
+    ac: 13,
+    conditions: [],
+    exhaustion: 0,
+    deathSuccesses: 0,
+    deathFailures: 0,
+    stable: false,
+    defeated: false,
+    concentration: null,
+    resistances: [],
+    immunities: [],
+    vulnerabilities: [],
+    isPlayerCharacter: true,
+    ...over,
+  });
+
+  it("knocks a character unconscious however the damage arrived", () => {
+    const result = applyDamage(pc(), { amount: 8, type: "slashing" });
+    expect(result.droppedToZero).toBe(true);
+    expect(result.patch.hpCurrent).toBe(0);
+    // This is what makes them start rolling death saves and be attacked at
+    // advantage; without it a downed character silently keeps playing.
+    expect(result.patch.conditions).toContain("unconscious");
+    expect(result.patch.defeated).toBeUndefined();
+  });
+
+  it("does not mark a monster unconscious — it is simply out", () => {
+    const goblin = pc({ name: "Goblin", isPlayerCharacter: false });
+    const result = applyDamage(goblin, { amount: 9, type: "slashing" });
+    expect(result.patch.defeated).toBe(true);
+    expect(result.patch.conditions).toBeUndefined();
+  });
+
+  it("keeps existing conditions when it adds unconscious", () => {
+    const result = applyDamage(pc({ conditions: ["poisoned"] }), {
+      amount: 8,
+      type: "fire",
+    });
+    expect(result.patch.conditions).toEqual(expect.arrayContaining(["poisoned", "unconscious"]));
+  });
+});

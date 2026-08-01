@@ -196,6 +196,13 @@ export function applyDamage(
     patch.concentration = null;
     if (instantDeath || !target.isPlayerCharacter) {
       patch.defeated = true;
+    } else {
+      // Falling unconscious belongs here, not at the call site. It used to be
+      // applied only by the weapon-attack path, so a character dropped by a
+      // spell or an opportunity attack stayed conscious at 0 HP and kept
+      // fighting — and never rolled a death save, because nothing marked them
+      // as dying. Every caller of applyDamage now gets it for free.
+      patch.conditions = [...new Set([...target.conditions, "unconscious"])];
     }
   }
 

@@ -106,6 +106,8 @@ const NEXT = [
 /** Deliberately listed: an honest status page has to include what is wrong. */
 const KNOWN_GAPS = [
   "Every campaign generated before 1 Aug has no arc or opening scene",
+  "The AI DM cannot make a monster roll a saving throw, only a player character",
+  "A rogue may end up wielding the dagger rather than the rapier, and there is no equip control",
   "The AI DM can remove a condition it did not apply, which is a way around the engine",
 ];
 

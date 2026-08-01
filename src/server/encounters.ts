@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { characters, combatants, encounters, maps, rolls as rollsTable } from "@/db/schema";
 import type { MapTerrain } from "@/db/schema";
@@ -17,6 +17,7 @@ import {
 } from "@/rules/combat";
 import { canTakeActions, effectiveSpeed } from "@/rules/conditions";
 import { checkMeleeReach, checkRange, distanceFt, provokesOpportunityAttacks, validatePath } from "@/rules/movement";
+import { selfAreaFt } from "@/rules/spells";
 import type { RollResult } from "@/rules/dice";
 import { srd } from "@/srd/local";
 import { listCharacters } from "./characters";
@@ -44,7 +45,13 @@ export type CombatantView = CombatantRow & {
     saveDc: number;
     attackBonus: number;
     slots: { level: number; max: number; used: number }[];
-    spells: { index: string; name: string; level: number; concentration: boolean }[];
+    spells: {
+      index: string;
+      name: string;
+      level: number;
+      concentration: boolean;
+      areaFt: number | null;
+    }[];
   } | null;
 };
 
@@ -142,6 +149,17 @@ export async function startEncounter(
   campaignId: string,
   request: EncounterRequest,
 ): Promise<EncounterView> {
+  // One fight at a time. Starting a second left both active, put characters in
+  // two encounters with two independent HP rows, and made whichever one
+  // getActiveEncounter happened to return the only reachable fight — so a
+  // double-click on the DM's control silently corrupted the table.
+  const running = await getActiveEncounter(campaignId);
+  if (running) {
+    throw new RuleError(
+      `"${running.name}" is still running. Finish it before starting another encounter.`,
+    );
+  }
+
   const sheets = await listCharacters(campaignId);
   const chosen = request.characterIds
     ? sheets.filter((s) => request.characterIds!.includes(s.id))
@@ -345,6 +363,7 @@ export async function getEncounter(encounterId: string): Promise<EncounterView> 
             name: d.name,
             level: d.level,
             concentration: d.concentration,
+            areaFt: selfAreaFt(d),
           }))
           .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)),
       };
@@ -389,6 +408,9 @@ export async function getActiveEncounter(campaignId: string): Promise<EncounterV
     .select({ id: encounters.id })
     .from(encounters)
     .where(and(eq(encounters.campaignId, campaignId), eq(encounters.status, "active")))
+    // Oldest first, so a campaign left with two actives by earlier code always
+    // resolves to the same one rather than whatever Postgres returns first.
+    .orderBy(asc(encounters.createdAt))
     .limit(1);
   return row ? getEncounter(row.id) : null;
 }
@@ -511,14 +533,6 @@ export async function performAttack(params: {
 
     await db.update(combatants).set(result.patch).where(eq(combatants.id, target.id));
     targetHpAfter = result.patch.hpCurrent ?? target.hpCurrent;
-
-    if (droppedToZero && result.patch.defeated !== true) {
-      // A player character at 0 HP falls unconscious and begins death saves.
-      await db
-        .update(combatants)
-        .set({ conditions: [...new Set([...target.conditions, "unconscious"])] })
-        .where(eq(combatants.id, target.id));
-    }
 
     await syncSheet(target.id);
     await checkConcentration({
@@ -869,11 +883,9 @@ export async function castSpellAction(params: {
       state: asState(row),
       x: row.x,
       y: row.y,
-      // Any save the spell might call for; the caster does not get to pick.
-      saveModifier: Math.max(
-        ...["str", "dex", "con", "int", "wis", "cha"].map((k) => saves[k] ?? 0),
-        0,
-      ),
+      // The whole spread, so the spell applies the ability it actually names.
+      // Taking the maximum here handed every target its single best save.
+      saveModifiers: saves,
     };
   });
 
@@ -896,6 +908,13 @@ export async function castSpellAction(params: {
     spellIndex: params.spellIndex,
     slotLevel: params.slotLevel,
     targets,
+    onConcentrationCheck: (combatantId, damage) =>
+      checkConcentration({
+        campaignId: encounter.campaignId,
+        encounterId: encounter.id,
+        combatantId,
+        damage,
+      }),
   });
 
   // Damage from a spell moves hit points, so the sheets follow.
@@ -945,6 +964,12 @@ async function resolveOpportunityAttack(params: {
     damage = result.adjusted;
     await db.update(combatants).set(result.patch).where(eq(combatants.id, target.id));
     await syncSheet(target.id);
+    await checkConcentration({
+      campaignId: params.campaignId,
+      encounterId: params.encounterId,
+      combatantId: target.id,
+      damage,
+    });
 
     await db.insert(rollsTable).values({
       campaignId: params.campaignId,

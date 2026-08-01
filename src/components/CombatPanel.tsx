@@ -26,6 +26,23 @@ type Props = {
 
 const signed = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
 
+/**
+ * How hurt a foe looks, rather than its exact hit points.
+ *
+ * A DM describes a wounded creature; they do not read its HP aloud. Printing
+ * the real numbers also tells players precisely how much damage is needed,
+ * which is not information the table is supposed to have.
+ */
+function woundLabel(c: Combatant): string {
+  if (c.hpMax <= 0) return "unhurt";
+  const share = c.hpCurrent / c.hpMax;
+  if (share >= 1) return "unhurt";
+  if (share > 0.75) return "barely scratched";
+  if (share > 0.5) return "wounded";
+  if (share > 0.25) return "badly wounded";
+  return "barely standing";
+}
+
 export function CombatPanel({ encounter, myCharacterIds, canCommandAll, onChanged }: Props) {
   const [targetId, setTargetId] = useState<string | null>(null);
   const [spellIndex, setSpellIndex] = useState<string>("");
@@ -119,7 +136,10 @@ export function CombatPanel({ encounter, myCharacterIds, canCommandAll, onChange
                   >
                     {targets.map((t) => (
                       <option key={t.id} value={t.id}>
-                        {t.name} — AC {t.ac}, {t.hpCurrent}/{t.hpMax} HP
+                        {t.name}
+                        {t.side === "party"
+                          ? ` — ${t.hpCurrent}/${t.hpMax} HP`
+                          : ` — ${woundLabel(t)}`}
                       </option>
                     ))}
                   </select>
@@ -169,6 +189,7 @@ export function CombatPanel({ encounter, myCharacterIds, canCommandAll, onChange
                 <SpellCaster
                   caster={active}
                   target={chosenTarget}
+                  allTargets={targets}
                   busy={busy}
                   spellIndex={spellIndex}
                   setSpellIndex={setSpellIndex}
@@ -352,9 +373,35 @@ function DeathSavePrompt({
  * are pinned to level 0 — but the server re-checks both, so a tampered client
  * gains nothing by offering itself a slot it has already spent.
  */
+/**
+ * Which combatants a cast should name.
+ *
+ * A single-target spell names the chosen target. An area spell names everything
+ * within its reach of the caster — the server re-checks each one, so this only
+ * decides what is offered, never what is legal.
+ */
+function targetIdsFor(
+  spell: { areaFt: number | null } | null,
+  caster: Combatant,
+  target: Combatant | null,
+  all: Combatant[],
+): string[] {
+  if (!spell?.areaFt || caster.x === null || caster.y === null) {
+    return target ? [target.id] : [];
+  }
+  const cells = Math.ceil(spell.areaFt / 5);
+  return all
+    .filter((c) => c.id !== caster.id && c.x !== null && c.y !== null)
+    .filter(
+      (c) => Math.max(Math.abs(c.x! - caster.x!), Math.abs(c.y! - caster.y!)) <= cells,
+    )
+    .map((c) => c.id);
+}
+
 function SpellCaster({
   caster,
   target,
+  allTargets,
   busy,
   spellIndex,
   setSpellIndex,
@@ -364,6 +411,7 @@ function SpellCaster({
 }: {
   caster: Combatant;
   target: Combatant | null;
+  allTargets: Combatant[];
   busy: boolean;
   spellIndex: string;
   setSpellIndex: (v: string) => void;
@@ -431,7 +479,7 @@ function SpellCaster({
             combatantId: caster.id,
             spellIndex,
             slotLevel: spell?.level === 0 ? 0 : (level ?? 1),
-            targetIds: target ? [target.id] : [],
+            targetIds: targetIdsFor(spell, caster, target, allTargets),
           })
         }
         className="rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-40"

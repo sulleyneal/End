@@ -17,6 +17,8 @@ export type SpellShape =
   | { kind: "attack"; attackType: "melee" | "ranged" }
   | { kind: "save"; ability: string; onSuccess: "none" | "half" | "other" }
   | { kind: "heal" }
+  /** Damage that simply lands: Magic Missile, Scorching Ray, Sleep. */
+  | { kind: "auto" }
   | { kind: "utility" };
 
 export class SpellError extends Error {}
@@ -29,9 +31,23 @@ export function rangeFt(spell: SrdSpell): number | null {
   return null;
 }
 
-/** True when a spell is cast on the caster or by touch, so range is not checked. */
-export function isSelfOrTouch(spell: SrdSpell): boolean {
-  return /^(self|touch)/i.test(spell.range.trim());
+export function isTouch(spell: SrdSpell): boolean {
+  return /^touch$/i.test(spell.range.trim());
+}
+
+/**
+ * The reach of a Self spell that has an area, e.g. `Self (15-foot cone)` -> 15.
+ * Null for a Self spell that affects only the caster.
+ *
+ * The grid is square, so a cone, line or radius of N feet cannot reach further
+ * than N feet in any direction; bounding it by that is a conservative check
+ * that a client cannot argue with, even before the exact shape is modelled.
+ */
+export function selfAreaFt(spell: SrdSpell): number | null {
+  if (!/^self/i.test(spell.range.trim())) return null;
+  const match = /\((\d+)[- ]?foot/i.exec(spell.range);
+  if (match) return Number(match[1]);
+  return spell.area_of_effect?.size ?? null;
 }
 
 export function shapeOf(spell: SrdSpell): SpellShape {
@@ -45,6 +61,12 @@ export function shapeOf(spell: SrdSpell): SpellShape {
     };
   }
   if (spell.heal_at_slot_level) return { kind: "heal" };
+  // A spell with damage but neither an attack roll nor a save hits automatically.
+  // Ten SRD spells are shaped this way, including Magic Missile and Scorching
+  // Ray; treating them as utility meant they spent a slot and did nothing.
+  if (spell.damage?.damage_at_slot_level || spell.damage?.damage_at_character_level) {
+    return { kind: "auto" };
+  }
   return { kind: "utility" };
 }
 

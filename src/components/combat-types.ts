@@ -42,7 +42,14 @@ export type Combatant = {
     saveDc: number;
     attackBonus: number;
     slots: { level: number; max: number; used: number }[];
-    spells: { index: string; name: string; level: number; concentration: boolean }[];
+    spells: {
+      index: string;
+      name: string;
+      level: number;
+      concentration: boolean;
+      /** Reach of a self-centred area, so the panel can name everyone inside it. */
+      areaFt: number | null;
+    }[];
   } | null;
   concentration: { spellIndex: string; spellName: string; level: number } | null;
 };

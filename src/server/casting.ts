@@ -18,8 +18,9 @@ import {
   SpellError,
   damageDiceFor,
   healingDiceFor,
-  isSelfOrTouch,
+  isTouch,
   rangeFt,
+  selfAreaFt,
   shapeOf,
   validateSlot,
 } from "@/rules/spells";
@@ -85,13 +86,16 @@ export async function castSpell(params: {
   };
   spellIndex: string;
   slotLevel: number;
+  /** Called when a damaged target was concentrating, so the caller can roll it. */
+  onConcentrationCheck?: (combatantId: string, damage: number) => Promise<unknown>;
   targets: {
     id: string;
     name: string;
     state: CombatantState;
     x: number | null;
     y: number | null;
-    saveModifier: number;
+    /** Every save modifier, so the spell picks the ability it actually calls for. */
+    saveModifiers: Partial<Record<string, number>>;
   }[];
 }): Promise<CastReport> {
   const { caster } = params;
@@ -121,16 +125,28 @@ export async function castSpell(params: {
     throw error instanceof SpellError ? new RuleError(error.message) : error;
   }
 
-  // Range is checked before the slot is spent — an out-of-range target is a
-  // mistake, not a wasted resource.
-  const reach = rangeFt(spell);
-  if (!isSelfOrTouch(spell) && reach !== null && caster.x !== null && caster.y !== null) {
+  // Checked before the slot is spent — an out-of-range target is a mistake, not
+  // a wasted resource. `isSelfOrTouch` used to skip this entirely, which let a cleric touch
+  // someone 20 ft away and let a 15-foot cone reach across the whole map.
+  // Touch is 5 ft; a Self spell with an area is measured from the caster's own
+  // square by that area's size.
+  const limitFt = (() => {
+    if (isTouch(spell)) return 5;
+    const area = selfAreaFt(spell);
+    if (area !== null) return area;
+    return rangeFt(spell);
+  })();
+
+  if (limitFt !== null && caster.x !== null && caster.y !== null) {
     for (const target of params.targets) {
       if (target.x === null || target.y === null) continue;
+      if (target.id === caster.id) continue;
       const away = distanceFt({ x: caster.x, y: caster.y }, { x: target.x, y: target.y });
-      if (away > reach) {
+      if (away > limitFt) {
         throw new RuleError(
-          `${target.name} is ${away} ft away, beyond ${spell.name}'s ${reach} ft range.`,
+          `${target.name} is ${away} ft away, beyond ${spell.name}'s ${limitFt} ft ${
+            selfAreaFt(spell) !== null ? "area" : "range"
+          }.`,
         );
       }
     }
@@ -178,6 +194,9 @@ export async function castSpell(params: {
   ) => {
     const outcome = applyDamage(target.state, { amount, type: damageType }, { critical });
     await db.update(combatants).set(outcome.patch).where(eq(combatants.id, target.id));
+    if (outcome.concentrationCheckDc !== null) {
+      await params.onConcentrationCheck?.(target.id, outcome.adjusted);
+    }
     report.results.push({
       targetName: target.name,
       damage: outcome.adjusted,
@@ -224,7 +243,7 @@ export async function castSpell(params: {
     for (const target of params.targets) {
       const save = resolveSave({
         ability: shape.ability as AbilityKey,
-        modifier: target.saveModifier,
+        modifier: target.saveModifiers[shape.ability] ?? 0,
         dc: caster.spellSaveDc,
         creature: target.state,
       });
@@ -246,6 +265,13 @@ export async function castSpell(params: {
           healed: 0,
           hpAfter: target.state.hpCurrent,
         });
+    }
+  } else if (shape.kind === "auto") {
+    // No attack roll, no save — the damage simply lands on every target.
+    const roll = damageFormula ? rollDamage(damageFormula) : null;
+    report.damageRoll = roll;
+    if (roll) {
+      for (const target of params.targets) await applyTo(target, roll.total, false);
     }
   } else if (shape.kind === "heal" && healFormula) {
     const roll = rollDamage(healFormula);
