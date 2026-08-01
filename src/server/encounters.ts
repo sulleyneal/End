@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { combatants, encounters, maps, rolls as rollsTable } from "@/db/schema";
+import type { MapTerrain } from "@/db/schema";
 import type { DerivedAttack } from "@/rules/character";
 import { abilityModifier } from "@/rules/character";
 import {
@@ -37,6 +38,15 @@ export type CombatantView = CombatantRow & {
   attacks: DerivedAttack[];
 };
 
+export type MapView = {
+  id: string;
+  width: number;
+  height: number;
+  cellSizeFt: number;
+  terrain: MapTerrain;
+  background: string | null;
+};
+
 export type EncounterView = {
   id: string;
   campaignId: string;
@@ -46,6 +56,8 @@ export type EncounterView = {
   round: number;
   turnIndex: number;
   combatants: CombatantView[];
+  /** The battlefield itself, so the client can draw terrain it must not invent. */
+  map: MapView | null;
   /** The combatant whose turn it is, or null outside an active encounter. */
   activeCombatantId: string | null;
 };
@@ -267,6 +279,10 @@ export async function getEncounter(encounterId: string): Promise<EncounterView> 
       ? (view[encounter.turnIndex % view.length]?.id ?? null)
       : null;
 
+  const [mapRow] = encounter.mapId
+    ? await db.select().from(maps).where(eq(maps.id, encounter.mapId)).limit(1)
+    : [];
+
   return {
     id: encounter.id,
     campaignId: encounter.campaignId,
@@ -276,6 +292,16 @@ export async function getEncounter(encounterId: string): Promise<EncounterView> 
     round: encounter.round,
     turnIndex: encounter.turnIndex,
     combatants: view,
+    map: mapRow
+      ? {
+          id: mapRow.id,
+          width: mapRow.width,
+          height: mapRow.height,
+          cellSizeFt: mapRow.cellSizeFt,
+          terrain: mapRow.terrain,
+          background: mapRow.background,
+        }
+      : null,
     activeCombatantId: active,
   };
 }

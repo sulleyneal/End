@@ -8,7 +8,9 @@ import { Button, ErrorNote, inputClass } from "@/components/ui";
 import { DiceLog } from "@/components/DiceLog";
 import { PartyPanel } from "@/components/PartyPanel";
 import { LogEntry, type Entry } from "@/components/LogEntry";
-import { CombatPanel, type Encounter } from "@/components/CombatPanel";
+import { CombatPanel } from "@/components/CombatPanel";
+import { BattleMap } from "@/components/BattleMap";
+import type { Encounter } from "@/components/combat-types";
 
 type Roll = {
   id: string;
@@ -172,6 +174,9 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
   }
 
   const myCharacter = state.characters.find((c) => c.userId === state.me.id);
+  const myCharacterIds = state.characters
+    .filter((c) => c.userId === state.me.id)
+    .map((c) => c.id);
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-4 lg:py-8">
@@ -213,6 +218,16 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
 
       <div className="grid flex-1 gap-4 lg:grid-cols-[1fr_20rem]">
         <section className={`flex min-h-0 flex-col ${tab === "story" ? "" : "hidden lg:flex"}`}>
+          {state.encounter?.map && (
+            <div className="mb-3">
+              <BattleMap
+                encounter={state.encounter}
+                myCharacterIds={myCharacterIds}
+                canCommandAll={state.me.role === "co_dm"}
+                onChanged={() => void refreshSide()}
+              />
+            </div>
+          )}
           <div
             data-testid="story-log"
             className="flex-1 space-y-3 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"
@@ -268,9 +283,7 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
             <div className={tab === "party" || tab === "dice" ? "hidden lg:block" : ""}>
               <CombatPanel
                 encounter={state.encounter}
-                myCharacterIds={state.characters
-                  .filter((c) => c.userId === state.me.id)
-                  .map((c) => c.id)}
+                myCharacterIds={myCharacterIds}
                 canCommandAll={state.me.role === "co_dm"}
                 onChanged={() => void refreshSide()}
               />

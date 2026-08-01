@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { Button, ErrorNote } from "@/components/ui";
+import type { Attack, Combatant, Encounter } from "@/components/combat-types";
+export type { Attack, Combatant, Encounter, MapShape } from "@/components/combat-types";
 
 /**
  * The combat surface: initiative order, whose turn it is, and the buttons that
@@ -12,49 +14,6 @@ import { Button, ErrorNote } from "@/components/ui";
  * No roll, damage number, or hit decision is computed on this side — the panel
  * is a remote control, not a rules engine.
  */
-
-export type Attack = {
-  name: string;
-  kind: "melee" | "ranged";
-  attackBonus: number;
-  damageDice: string;
-  damageBonus: number;
-  damageType: string;
-  reachFt?: number;
-  rangeFt?: { normal: number; long?: number } | null;
-};
-
-export type Combatant = {
-  id: string;
-  characterId: string | null;
-  name: string;
-  side: "party" | "foe" | "neutral";
-  initiative: number | null;
-  hpCurrent: number;
-  hpMax: number;
-  tempHp: number;
-  ac: number;
-  speed: number;
-  conditions: string[];
-  movementUsed: number;
-  actionUsed: boolean;
-  deathSuccesses: number;
-  deathFailures: number;
-  stable: boolean;
-  defeated: boolean;
-  x: number | null;
-  y: number | null;
-  attacks: Attack[];
-};
-
-export type Encounter = {
-  id: string;
-  name: string;
-  status: string;
-  round: number;
-  activeCombatantId: string | null;
-  combatants: Combatant[];
-};
 
 type Props = {
   encounter: Encounter;

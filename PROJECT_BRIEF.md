@@ -135,6 +135,13 @@ name.
 - Chromium and Playwright are preinstalled (`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`).
   Do not run `playwright install`.
 
+## Owner action items
+
+- [ ] **Make the GitHub repo private.** `sulleyneal/End` is currently public. No
+  credentials are committed — they live in Vercel and the Claude environment — but the
+  owner wants it private. Vercel's GitHub integration keeps working after the switch.
+  Raise this if it is still unchecked when the build is otherwise done.
+
 ## Status
 
 **Done**
