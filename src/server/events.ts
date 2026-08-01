@@ -35,6 +35,7 @@ export type EventType =
   | "member.joined"
   | "campaign.updated"
   | "campaign.generated"
+  | "session.ended"
   | "dm.thinking"
   | "async.submitted";
 

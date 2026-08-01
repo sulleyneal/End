@@ -4,6 +4,7 @@ import { campaignArcs, campaigns, locations, npcs, plotThreads, quests, worldFac
 import { eq } from "drizzle-orm";
 import { appendEvent, postMessage } from "@/server/events";
 import { DM_MODEL, anthropic } from "./client";
+import { ensureOpenSession } from "./recap";
 
 /**
  * Campaign generation.
@@ -307,6 +308,9 @@ export async function generateCampaign(params: {
     kind: "narration",
     content: plan.openingScene,
   });
+
+  // Session 1 opens here, so the first recap knows where the story began.
+  await ensureOpenSession(campaignId);
 
   await appendEvent(campaignId, "campaign.generated", {
     title: plan.title,

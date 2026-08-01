@@ -10,6 +10,7 @@ import { PartyPanel } from "@/components/PartyPanel";
 import { LogEntry, type Entry } from "@/components/LogEntry";
 import { CombatPanel } from "@/components/CombatPanel";
 import { BattleMap } from "@/components/BattleMap";
+import { Journal } from "@/components/Journal";
 import type { Encounter } from "@/components/combat-types";
 
 type Roll = {
@@ -60,7 +61,7 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
   const [error, setError] = useState("");
   const [action, setAction] = useState("");
   const [thinking, setThinking] = useState(false);
-  const [tab, setTab] = useState<"story" | "combat" | "party" | "dice">("story");
+  const [tab, setTab] = useState<"story" | "combat" | "party" | "dice" | "journal">("story");
   const bottom = useRef<HTMLDivElement>(null);
   const seen = useRef(new Set<string>());
 
@@ -199,8 +200,8 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
           appears while there is an encounter to act in. */}
       <nav className="mb-3 flex gap-1 lg:hidden">
         {(state.encounter
-          ? (["story", "combat", "party", "dice"] as const)
-          : (["story", "party", "dice"] as const)
+          ? (["story", "combat", "party", "dice", "journal"] as const)
+          : (["story", "party", "dice", "journal"] as const)
         ).map((t) => (
           <button
             key={t}
@@ -280,7 +281,11 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
 
         <aside className={`space-y-4 ${tab === "story" ? "hidden lg:block" : ""}`}>
           {state.encounter && (
-            <div className={tab === "party" || tab === "dice" ? "hidden lg:block" : ""}>
+            <div
+              className={
+                tab === "party" || tab === "dice" || tab === "journal" ? "hidden lg:block" : ""
+              }
+            >
               <CombatPanel
                 encounter={state.encounter}
                 myCharacterIds={myCharacterIds}
@@ -289,11 +294,26 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
               />
             </div>
           )}
-          <div className={tab === "dice" || tab === "combat" ? "hidden lg:block" : ""}>
+          <div
+            className={
+              tab === "dice" || tab === "combat" || tab === "journal" ? "hidden lg:block" : ""
+            }
+          >
             <PartyPanel characters={state.characters} meId={state.me.id} />
           </div>
-          <div className={tab === "party" || tab === "combat" ? "hidden lg:block" : ""}>
+          <div
+            className={
+              tab === "party" || tab === "combat" || tab === "journal" ? "hidden lg:block" : ""
+            }
+          >
             <DiceLog rolls={rolls} />
+          </div>
+          <div className={tab === "journal" ? "" : "hidden lg:block"}>
+            <Journal
+              campaignId={campaignId}
+              canEndSession={state.me.role === "co_dm"}
+              onEnded={() => void refreshSide()}
+            />
           </div>
         </aside>
       </div>
