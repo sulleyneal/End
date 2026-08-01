@@ -173,6 +173,8 @@ export type Membership = {
   campaignId: string;
   userId: string;
   role: "player" | "co_dm" | "observer";
+  /** Null until this member opens the table for a second time. */
+  lastSeenAt: Date | null;
 };
 
 export async function getMembership(

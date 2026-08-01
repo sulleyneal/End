@@ -215,3 +215,38 @@ export async function listJournal(campaignId: string) {
     highlights: r.highlights,
   }));
 }
+
+/**
+ * A short catch-up for a player who has been away.
+ *
+ * Separate from the session recap: this is not a journal entry, it is the two
+ * sentences someone needs before they can take their turn. Runs on the cheap
+ * model — it is summarisation, not invention.
+ */
+export async function summariseMissed(lines: string[]): Promise<string | null> {
+  if (lines.length === 0) return null;
+
+  const response = await anthropic().messages.create({
+    model: PARSER_MODEL,
+    max_tokens: 400,
+    system:
+      "You catch a player up on what happened at their D&D table while they were away. " +
+      "Two or three sentences, past tense, plain and specific. Only what is in the log — " +
+      "if it is not there, it did not happen. No dice results, no hit points, no statistics. " +
+      "End with where the party is now and what is in front of them.",
+    messages: [
+      {
+        role: "user",
+        content: `While they were away:\n\n${lines.join("\n\n").slice(0, 30000)}`,
+      },
+    ],
+  });
+
+  const text = response.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("")
+    .trim();
+
+  return text.length > 0 ? text : null;
+}

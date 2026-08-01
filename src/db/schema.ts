@@ -250,6 +250,8 @@ export const campaignMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: text("role").$type<MemberRole>().notNull().default("player"),
+    /** When this member last opened the table, for the what-you-missed catch-up. */
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     joinedAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.campaignId, t.userId] })],

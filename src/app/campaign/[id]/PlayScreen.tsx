@@ -71,6 +71,7 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
   >("story");
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [tray, setTray] = useState<Roll | null>(null);
+  const [missed, setMissed] = useState<{ summary: string; count: number } | null>(null);
   const [unreadChat, setUnreadChat] = useState(0);
   const bottom = useRef<HTMLDivElement>(null);
   const seen = useRef(new Set<string>());
@@ -114,6 +115,16 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
         setRolls(s.rolls);
       })
       .catch((e: Error) => setError(e.message));
+  }, [campaignId]);
+
+  useEffect(() => {
+    api<{ missed: { summary: string; count: number } | null }>(
+      `/api/campaigns/${campaignId}/catchup`,
+    )
+      .then((r) => setMissed(r.missed))
+      .catch(() => {
+        // Missing a catch-up is not worth interrupting the table for.
+      });
   }, [campaignId]);
 
   const onEvent = useCallback(
@@ -271,6 +282,28 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
           </button>
         ))}
       </nav>
+
+      {missed && (
+        <aside
+          data-testid="catchup"
+          className="mb-3 rounded-xl border border-[var(--accent)] bg-[var(--accent-soft)] p-4"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold">While you were away</h2>
+              <p className="mt-1 text-sm leading-relaxed">{missed.summary}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMissed(null)}
+              aria-label="Dismiss catch-up"
+              className="shrink-0 rounded-lg px-2 py-1 text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
+            >
+              ✕
+            </button>
+          </div>
+        </aside>
+      )}
 
       {tray && (
         <DiceTray
