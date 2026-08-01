@@ -11,6 +11,7 @@ import { LogEntry, type Entry } from "@/components/LogEntry";
 import { CombatPanel } from "@/components/CombatPanel";
 import { BattleMap } from "@/components/BattleMap";
 import { Journal } from "@/components/Journal";
+import { ChatPanel, type ChatMessage } from "@/components/ChatPanel";
 import type { Encounter } from "@/components/combat-types";
 
 type Roll = {
@@ -61,7 +62,11 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
   const [error, setError] = useState("");
   const [action, setAction] = useState("");
   const [thinking, setThinking] = useState(false);
-  const [tab, setTab] = useState<"story" | "combat" | "party" | "dice" | "journal">("story");
+  const [tab, setTab] = useState<
+    "story" | "combat" | "chat" | "party" | "dice" | "journal"
+  >("story");
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [unreadChat, setUnreadChat] = useState(0);
   const bottom = useRef<HTMLDivElement>(null);
   const seen = useRef(new Set<string>());
 
@@ -81,7 +86,18 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
       .then((s) => {
         setState(s);
         for (const m of s.messages) seen.current.add(m.id);
-        setEntries(s.messages);
+        // Table chat has its own panel; the story stays narrative-only.
+        setEntries(s.messages.filter((m) => m.kind !== "ooc"));
+        setChat(
+          s.messages
+            .filter((m) => m.kind === "ooc")
+            .map((m) => ({
+              id: m.id,
+              authorName: m.authorName,
+              content: m.content,
+              createdAt: m.createdAt,
+            })),
+        );
         setRolls(s.rolls);
       })
       .catch((e: Error) => setError(e.message));
@@ -99,6 +115,21 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
         // The player who submitted already rendered this optimistically.
         if (seen.current.has(p.messageId)) return;
         seen.current.add(p.messageId);
+
+        if (p.kind === "ooc") {
+          setChat((prev) => [
+            ...prev,
+            {
+              id: p.messageId,
+              authorName: p.authorName,
+              content: p.content,
+              createdAt: event.createdAt,
+            },
+          ]);
+          setUnreadChat((n) => n + 1);
+          return;
+        }
+
         setThinking(false);
         setEntries((prev) => [
           ...prev,
@@ -200,19 +231,30 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
           appears while there is an encounter to act in. */}
       <nav className="mb-3 flex gap-1 lg:hidden">
         {(state.encounter
-          ? (["story", "combat", "party", "dice", "journal"] as const)
-          : (["story", "party", "dice", "journal"] as const)
+          ? (["story", "combat", "chat", "party", "dice", "journal"] as const)
+          : (["story", "chat", "party", "dice", "journal"] as const)
         ).map((t) => (
           <button
             key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium capitalize transition ${
+            onClick={() => {
+              setTab(t);
+              if (t === "chat") setUnreadChat(0);
+            }}
+            className={`relative flex-1 rounded-lg px-2 py-2 text-xs font-medium capitalize transition sm:text-sm ${
               tab === t
                 ? "bg-[var(--accent)] text-white"
                 : "bg-[var(--surface-2)] text-[var(--muted)]"
             }`}
           >
             {t}
+            {t === "chat" && unreadChat > 0 && tab !== "chat" && (
+              <span
+                data-testid="chat-unread"
+                className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-[var(--danger)] px-1 text-[10px] font-semibold text-white"
+              >
+                {unreadChat}
+              </span>
+            )}
           </button>
         ))}
       </nav>
@@ -283,7 +325,7 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
           {state.encounter && (
             <div
               className={
-                tab === "party" || tab === "dice" || tab === "journal" ? "hidden lg:block" : ""
+                tab === "party" || tab === "dice" || tab === "journal" || tab === "chat" ? "hidden lg:block" : ""
               }
             >
               <CombatPanel
@@ -296,17 +338,28 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
           )}
           <div
             className={
-              tab === "dice" || tab === "combat" || tab === "journal" ? "hidden lg:block" : ""
+              tab === "dice" || tab === "combat" || tab === "journal" || tab === "chat" ? "hidden lg:block" : ""
             }
           >
             <PartyPanel characters={state.characters} meId={state.me.id} />
           </div>
           <div
             className={
-              tab === "party" || tab === "combat" || tab === "journal" ? "hidden lg:block" : ""
+              tab === "party" || tab === "combat" || tab === "journal" || tab === "chat" ? "hidden lg:block" : ""
             }
           >
             <DiceLog rolls={rolls} />
+          </div>
+          <div className={tab === "chat" ? "" : "hidden lg:block"}>
+            <ChatPanel
+              campaignId={campaignId}
+              messages={chat}
+              meName={state.me.displayName}
+              onSent={(message) => {
+                seen.current.add(message.id);
+                setChat((prev) => [...prev, message]);
+              }}
+            />
           </div>
           <div className={tab === "journal" ? "" : "hidden lg:block"}>
             <Journal

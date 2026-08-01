@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
   campaignArcs,
@@ -80,7 +80,9 @@ export async function buildProjection(campaignId: string): Promise<MemoryProject
       db
         .select()
         .from(messages)
-        .where(eq(messages.campaignId, campaignId))
+        // Table chat is between the players. It never enters the DM's context,
+        // which is what lets the chat panel promise the DM cannot see it.
+        .where(and(eq(messages.campaignId, campaignId), ne(messages.kind, "ooc")))
         .orderBy(desc(messages.createdAt))
         .limit(RECENT_BEATS),
       listCharacters(campaignId),

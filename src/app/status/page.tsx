@@ -88,6 +88,7 @@ const DONE = [
   "Session recaps written to a campaign journal",
   "Grid battle map with tap-to-move over server-validated movement",
   "AI DM over tool-use intents — it cannot express a number that matters",
+  "Table chat between the players — instant, free, and invisible to the DM",
   "Play screen, character builder, dice audit log",
 ];
 
