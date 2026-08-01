@@ -604,7 +604,12 @@ export async function moveCombatant(params: {
   encounterId: string;
   combatantId: string;
   path: { x: number; y: number }[];
-}): Promise<{ encounter: EncounterView; costFt: number; provoked: { id: string; name: string }[] }> {
+}): Promise<{
+  encounter: EncounterView;
+  costFt: number;
+  provoked: { id: string; name: string }[];
+  opportunityAttacks: { attackerName: string; hit: boolean; damage: number }[];
+}> {
   const { encounter, actor } = await requireTurn(params.encounterId, params.combatantId);
 
   const [map] = encounter.mapId
@@ -641,6 +646,33 @@ export async function moveCombatant(params: {
     }));
   const provoked = provokesOpportunityAttacks(from, params.path, enemies);
 
+  // Opportunity attacks resolve before the move lands, which is the order the
+  // rules use: you are struck as you leave reach, not after you have arrived.
+  const opportunityAttacks: { attackerName: string; hit: boolean; damage: number }[] = [];
+  for (const enemy of provoked) {
+    const attacker = encounter.combatants.find((c) => c.id === enemy.id);
+    if (!attacker) continue;
+    const result = await resolveOpportunityAttack({
+      campaignId: encounter.campaignId,
+      encounterId: encounter.id,
+      attacker,
+      target: actor,
+    });
+    if (result) opportunityAttacks.push(result);
+  }
+
+  // A mover dropped by an opportunity attack does not complete the move.
+  const [afterReactions] = await db
+    .select()
+    .from(combatants)
+    .where(eq(combatants.id, actor.id))
+    .limit(1);
+
+  if (afterReactions && afterReactions.hpCurrent === 0) {
+    const stopped = await getEncounter(params.encounterId);
+    return { encounter: stopped, costFt: 0, provoked, opportunityAttacks };
+  }
+
   const destination = params.path[params.path.length - 1] ?? from;
   await db
     .update(combatants)
@@ -661,7 +693,7 @@ export async function moveCombatant(params: {
     provoked,
   });
 
-  return { encounter: updated, costFt: validation.costFt, provoked };
+  return { encounter: updated, costFt: validation.costFt, provoked, opportunityAttacks };
 }
 
 /* ------------------------------------------------------------------ *
@@ -864,4 +896,89 @@ export async function castSpellAction(params: {
 
   const updated = await maybeEndEncounter(await getEncounter(params.encounterId));
   return { encounter: updated, cast };
+}
+
+/**
+ * An opportunity attack.
+ *
+ * Deliberately not routed through `performAttack`, which requires it to be the
+ * attacker's turn — the whole point of a reaction is that it happens on someone
+ * else's. It costs the attacker their reaction, uses their melee attack, and is
+ * rolled by the server like every other attack.
+ */
+async function resolveOpportunityAttack(params: {
+  campaignId: string;
+  encounterId: string;
+  attacker: CombatantView;
+  target: CombatantView;
+}): Promise<{ attackerName: string; hit: boolean; damage: number } | null> {
+  const { attacker, target } = params;
+  if (attacker.reactionUsed || attacker.defeated) return null;
+  if (!canTakeActions({ conditions: attacker.conditions, exhaustion: attacker.exhaustion })) {
+    return null;
+  }
+
+  const attack = attacker.attacks.find((a) => a.kind === "melee");
+  if (!attack) return null;
+
+  await db.update(combatants).set({ reactionUsed: true }).where(eq(combatants.id, attacker.id));
+
+  const outcome = resolveAttack({
+    attackBonus: attack.attackBonus,
+    attacker: { conditions: attacker.conditions, exhaustion: attacker.exhaustion },
+    target: asState(target),
+    rangeFt: 5,
+  });
+
+  let damage = 0;
+  if (outcome.hit) {
+    const { roll, packet } = rollWeaponDamage(attack, { critical: outcome.critical });
+    const result = applyDamage(asState(target), packet, { critical: outcome.critical });
+    damage = result.adjusted;
+    await db.update(combatants).set(result.patch).where(eq(combatants.id, target.id));
+    await syncSheet(target.id);
+
+    await db.insert(rollsTable).values({
+      campaignId: params.campaignId,
+      encounterId: params.encounterId,
+      actorType: "combatant",
+      actorId: attacker.id,
+      actorName: attacker.name,
+      kind: "damage",
+      formula: roll.formula,
+      dice: roll.dice,
+      modifier: roll.modifier,
+      advantage: "normal",
+      total: roll.total,
+      targetName: target.name,
+      dc: null,
+      outcome: "opportunity attack",
+    });
+  }
+
+  await db.insert(rollsTable).values({
+    campaignId: params.campaignId,
+    encounterId: params.encounterId,
+    actorType: "combatant",
+    actorId: attacker.id,
+    actorName: attacker.name,
+    kind: "attack",
+    formula: outcome.roll.formula,
+    dice: outcome.roll.dice,
+    modifier: outcome.roll.modifier,
+    advantage: outcome.advantage,
+    total: outcome.roll.total,
+    targetName: target.name,
+    dc: target.ac,
+    outcome: outcome.hit ? (outcome.critical ? "critical hit" : "hit") : "miss",
+  });
+
+  await appendEvent(params.campaignId, "combatant.updated", {
+    encounterId: params.encounterId,
+    combatantId: target.id,
+    name: target.name,
+    opportunityAttack: { by: attacker.name, hit: outcome.hit, damage },
+  });
+
+  return { attackerName: attacker.name, hit: outcome.hit, damage };
 }
