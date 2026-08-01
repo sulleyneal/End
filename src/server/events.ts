@@ -1,6 +1,6 @@
 import { and, asc, eq, gt } from "drizzle-orm";
 import { db, sqlClient } from "@/db";
-import { events } from "@/db/schema";
+import { events, messages } from "@/db/schema";
 
 /**
  * The realtime spine.
@@ -34,6 +34,7 @@ export type EventType =
   | "map.updated"
   | "member.joined"
   | "campaign.updated"
+  | "campaign.generated"
   | "dm.thinking"
   | "async.submitted";
 
@@ -119,4 +120,43 @@ export async function currentSeq(campaignId: string): Promise<number> {
     campaignId,
   ])) as { event_seq: string | number }[];
   return rows.length > 0 ? Number(rows[0].event_seq) : 0;
+}
+
+/**
+ * Writes a message to the log and announces it on the stream.
+ *
+ * The DM turn loop has its own copy of this that also collects entries for the
+ * HTTP response; this is the plain version, for anything posting a message
+ * outside a turn — campaign generation, session recaps, system notices.
+ */
+export async function postMessage(params: {
+  campaignId: string;
+  authorType: "player" | "dm" | "system";
+  authorName: string;
+  kind: "narration" | "dialogue" | "ooc" | "system" | "ruling" | "action";
+  content: string;
+  metadata?: Record<string, unknown>;
+}): Promise<string> {
+  const [row] = await db
+    .insert(messages)
+    .values({
+      campaignId: params.campaignId,
+      authorType: params.authorType,
+      authorName: params.authorName,
+      kind: params.kind,
+      content: params.content,
+      metadata: params.metadata,
+    })
+    .returning({ id: messages.id });
+
+  await appendEvent(params.campaignId, "message", {
+    messageId: row.id,
+    authorType: params.authorType,
+    authorName: params.authorName,
+    kind: params.kind,
+    content: params.content,
+    metadata: params.metadata ?? null,
+  });
+
+  return row.id;
 }
