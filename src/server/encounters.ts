@@ -7,10 +7,12 @@ import { abilityModifier } from "@/rules/character";
 import {
   type CombatantState,
   applyDamage,
+  concentrationDc,
   resolveAttack,
   rollDeathSave,
   rollInitiative,
   rollWeaponDamage,
+  resolveSave,
   sortInitiative,
 } from "@/rules/combat";
 import { canTakeActions, effectiveSpeed } from "@/rules/conditions";
@@ -519,6 +521,12 @@ export async function performAttack(params: {
     }
 
     await syncSheet(target.id);
+    await checkConcentration({
+      campaignId: encounter.campaignId,
+      encounterId: encounter.id,
+      combatantId: target.id,
+      damage: damageTaken,
+    });
   }
 
   await db.update(combatants).set({ actionUsed: true }).where(eq(combatants.id, actor.id));
@@ -981,4 +989,64 @@ async function resolveOpportunityAttack(params: {
   });
 
   return { attackerName: attacker.name, hit: outcome.hit, damage };
+}
+
+/**
+ * A concentrating creature that takes damage must hold the spell or lose it.
+ *
+ * DC 10 or half the damage, whichever is higher. Rolled here rather than left
+ * to the AI, because losing concentration changes what is on the battlefield.
+ */
+async function checkConcentration(params: {
+  campaignId: string;
+  encounterId: string;
+  combatantId: string;
+  damage: number;
+}): Promise<{ spellName: string; held: boolean } | null> {
+  if (params.damage <= 0) return null;
+
+  const [row] = await db
+    .select()
+    .from(combatants)
+    .where(eq(combatants.id, params.combatantId))
+    .limit(1);
+  if (!row?.concentration) return null;
+
+  const dc = concentrationDc(params.damage);
+  const saves = (row.stats as CombatStats | null)?.saveModifiers ?? {};
+  const save = resolveSave({
+    ability: "con",
+    modifier: saves.con ?? 0,
+    dc,
+    creature: asState(row),
+  });
+
+  await db.insert(rollsTable).values({
+    campaignId: params.campaignId,
+    encounterId: params.encounterId,
+    actorType: "combatant",
+    actorId: row.id,
+    actorName: row.name,
+    kind: "save",
+    formula: save.roll?.formula ?? "1d20",
+    dice: save.roll?.dice ?? [],
+    modifier: saves.con ?? 0,
+    advantage: save.advantage,
+    total: save.total,
+    dc,
+    outcome: save.success ? "concentration held" : "concentration broken",
+  });
+
+  const spellName = row.concentration.spellName;
+  if (!save.success) {
+    await db.update(combatants).set({ concentration: null }).where(eq(combatants.id, row.id));
+    await appendEvent(params.campaignId, "combatant.updated", {
+      encounterId: params.encounterId,
+      combatantId: row.id,
+      name: row.name,
+      concentrationBroken: spellName,
+    });
+  }
+
+  return { spellName, held: save.success };
 }

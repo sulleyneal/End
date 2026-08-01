@@ -74,25 +74,38 @@ async function runChecks(): Promise<Check[]> {
 }
 
 const DONE = [
-  "Rules engine: dice, AC, saves, skills, attacks, damage with resistance, temp HP, death saves, concentration, all 15 conditions, exhaustion, grid movement, rests",
-  "858 unit tests, including a sheet audit across all 12 classes and 10 levels against hand-written PHB tables",
+  "Rules engine: dice, AC, saves, skills, attacks, damage with resistance, temp HP, death saves, all 15 conditions, exhaustion, grid movement, rests",
+  "880 unit tests, including a sheet audit across all 12 classes and 10 levels against hand-written PHB tables",
   "SRD 5.1 seeded into Postgres with generated filter columns",
-  "Identity without accounts: display name, device cookie, reclaim code",
+  "Racial traits: trait proficiencies, Dwarven Toughness, High Elf Cantrip, Hellish Resistance",
+  "Identity without accounts: display name, device cookie, throttled reclaim code",
   "Campaigns, join codes, membership checks on every route",
   "Lossless realtime: per-campaign event log, cursor-resumed SSE",
-  "Legal level-1 character creation with fully validated starting equipment",
-  "Encounters: server-rolled initiative, turn gating, reach and range, opportunity attacks",
+  "Legal level-1 character creation with validated starting equipment and spells",
+  "Encounters: server-rolled initiative, turn gating, reach and range, resolved opportunity attacks",
+  "Spellcasting: known and prepared spells, slots that get spent, upcasting, concentration",
+  "Campaign generation: arc, NPCs, locations, plot threads and an opening scene",
+  "Session recaps written to a campaign journal",
+  "Grid battle map with tap-to-move over server-validated movement",
   "AI DM over tool-use intents — it cannot express a number that matters",
   "Play screen, character builder, dice audit log",
 ];
 
 const NEXT = [
-  "Canvas battle map with drag-to-move (movement is already validated server-side)",
   "3D dice tray replaying the server's roll",
-  "Spellcasting UI: slot spending, concentration prompts",
   "Short and long rest UI (the engine is done and tested)",
-  "Async turns for players who are away",
-  "Playwright end-to-end run across four independent browser contexts",
+  "Async turns with a what-you-missed recap for the player who was away",
+  "Levelling: XP is awarded and tracked but nothing levels up yet",
+  "Uploadable character portraits",
+  "Rogue Expertise and Sneak Attack, Monk Martial Arts",
+  "Ranged attacks in melee do not yet take disadvantage",
+  "Battle maps have no walls or difficult terrain yet — the engine enforces both, nothing authors them",
+];
+
+/** Deliberately listed: an honest status page has to include what is wrong. */
+const KNOWN_GAPS = [
+  "Every campaign generated before 1 Aug has no arc or opening scene",
+  "The AI DM can remove a condition it did not apply, which is a way around the engine",
 ];
 
 export default async function StatusPage() {
@@ -147,6 +160,22 @@ export default async function StatusPage() {
           {NEXT.map((item) => (
             <li key={item} className="flex gap-2 text-sm text-[var(--muted)]">
               <span aria-hidden>·</span>
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="font-semibold">Known gaps</h2>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          Things that are wrong right now, found by an adversarial pass rather than reported by
+          the build.
+        </p>
+        <ul className="mt-2 space-y-1.5">
+          {KNOWN_GAPS.map((item) => (
+            <li key={item} className="flex gap-2 text-sm text-[var(--danger)]">
+              <span aria-hidden>!</span>
               <span>{item}</span>
             </li>
           ))}
