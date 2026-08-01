@@ -74,6 +74,7 @@ export async function createCharacter(params: {
     equipmentCategories: srd.equipmentCategories(),
     equipmentDocs: srd.equipment(),
     traitDocs: srd.traits(),
+    spellDocs: srd.spells(),
   });
 
   const [row] = await db
@@ -103,6 +104,18 @@ export async function createCharacter(params: {
         itemIndex: i.itemIndex,
         quantity: i.quantity,
         equipped: i.equipped,
+      })),
+    );
+  }
+
+  if (built.spells.length > 0) {
+    await db.insert(characterSpells).values(
+      built.spells.map((s) => ({
+        characterId: row.id,
+        spellIndex: s.spellIndex,
+        prepared: s.prepared,
+        alwaysPrepared: s.alwaysPrepared,
+        source: "class",
       })),
     );
   }

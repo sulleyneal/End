@@ -21,6 +21,7 @@ import { listCharacters } from "./characters";
 import { appendEvent } from "./events";
 import { NotFoundError, RuleError } from "./http";
 import { type CombatStats, monsterArmorClass, monsterCombatStats, monsterHitPoints } from "./monsters";
+import { type CastReport, castSpell } from "./casting";
 
 /**
  * Encounter orchestration.
@@ -747,4 +748,75 @@ async function maybeEndEncounter(view: EncounterView): Promise<EncounterView> {
   });
 
   return { ...view, status: "resolved", activeCombatantId: null };
+}
+
+/* ------------------------------------------------------------------ *
+ * Casting
+ * ------------------------------------------------------------------ */
+
+/**
+ * Assembles the caster and targets from the encounter, then hands off to the
+ * casting engine. Turn order, action economy and ownership are enforced here
+ * exactly as they are for a weapon attack — a spell is not a way around them.
+ */
+export async function castSpellAction(params: {
+  encounterId: string;
+  combatantId: string;
+  spellIndex: string;
+  slotLevel: number;
+  targetIds: string[];
+}): Promise<{ encounter: EncounterView; cast: CastReport }> {
+  const { encounter, actor } = await requireTurn(params.encounterId, params.combatantId);
+  if (actor.actionUsed) throw new RuleError(`${actor.name} has already taken an action this turn.`);
+  if (!actor.characterId) throw new RuleError(`${actor.name} has no spellcasting.`);
+
+  const sheets = await listCharacters(encounter.campaignId);
+  const sheet = sheets.find((s) => s.id === actor.characterId);
+  if (!sheet?.derived.spellcasting) throw new RuleError(`${actor.name} cannot cast spells.`);
+
+  const targets = params.targetIds.map((id) => {
+    const row = encounter.combatants.find((c) => c.id === id);
+    if (!row) throw new NotFoundError("No such target.");
+    const saves = (row.stats as CombatStats | null)?.saveModifiers ?? {};
+    return {
+      id: row.id,
+      name: row.name,
+      state: asState(row),
+      x: row.x,
+      y: row.y,
+      // Any save the spell might call for; the caster does not get to pick.
+      saveModifier: Math.max(
+        ...["str", "dex", "con", "int", "wis", "cha"].map((k) => saves[k] ?? 0),
+        0,
+      ),
+    };
+  });
+
+  const cast = await castSpell({
+    campaignId: encounter.campaignId,
+    encounterId: encounter.id,
+    caster: {
+      id: actor.id,
+      characterId: actor.characterId,
+      name: actor.name,
+      level: sheet.level,
+      x: actor.x,
+      y: actor.y,
+      spellAttackBonus: sheet.derived.spellcasting.attackBonus,
+      spellSaveDc: sheet.derived.spellcasting.saveDc,
+      spellModifier: sheet.derived.spellcasting.modifier,
+      conditions: actor.conditions,
+      exhaustion: actor.exhaustion,
+    },
+    spellIndex: params.spellIndex,
+    slotLevel: params.slotLevel,
+    targets,
+  });
+
+  // Damage from a spell moves hit points, so the sheets follow.
+  for (const target of targets) await syncSheet(target.id);
+  await syncSheet(actor.id);
+
+  const updated = await maybeEndEncounter(await getEncounter(params.encounterId));
+  return { encounter: updated, cast };
 }

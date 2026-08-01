@@ -9,6 +9,7 @@ import {
 import { buildLevel1Character, skillOptionsFor } from "@/rules/build";
 import { equipmentChoicesFor } from "@/rules/equipment";
 import { resolveTraits } from "@/rules/traits";
+import { spellListFor, spellcastingPlan } from "@/rules/spells";
 import { srd, srdGet } from "@/srd/local";
 import { ABILITIES, type AbilityKey } from "@/srd/types";
 
@@ -218,6 +219,37 @@ function characterAt(classIndex: string, raceIndex: string, level: number): Char
     class: classIndex,
     level,
     ...BASE_SCORES,
+  };
+}
+
+/**
+ * The first legal set of cantrips and spells for a class, so the audit can
+ * build casters without hand-picking a spell list per class.
+ */
+function firstLegalSpells(classIndex: string, scores: Record<AbilityKey, number>) {
+  const classDoc = srdGet.class(classIndex);
+  const levelDoc = srd.levels().find((l) => l.index === `${classIndex}-1`);
+  const casting = levelDoc?.spellcasting;
+  const ability = classDoc.spellcasting?.spellcasting_ability?.index as AbilityKey | undefined;
+  if (!casting || !ability) return { cantripChoices: [], spellChoices: [] };
+
+  const raceBonus = (srdGet.race("human").ability_bonuses ?? [])
+    .filter((b) => b.ability_score.index === ability)
+    .reduce((sum, b) => sum + b.bonus, 0);
+
+  const plan = spellcastingPlan({
+    classIndex,
+    level: 1,
+    cantripsKnown: casting.cantrips_known ?? 0,
+    spellsKnown: casting.spells_known,
+    castingModifier: Math.floor((scores[ability] + raceBonus - 10) / 2),
+  });
+  if (!plan) return { cantripChoices: [], spellChoices: [] };
+
+  const list = spellListFor(srd.spells(), classIndex, 1);
+  return {
+    cantripChoices: list.filter((s) => s.level === 0).slice(0, plan.cantrips).map((s) => s.index),
+    spellChoices: list.filter((s) => s.level === 1).slice(0, plan.spells).map((s) => s.index),
   };
 }
 
@@ -562,6 +594,7 @@ describe("level-1 construction", () => {
         scoreMethod: "standard-array",
         skillChoices: skillPicksFor(classDoc),
         equipmentSelections: firstLegalKit(classIndex),
+        ...firstLegalSpells(classIndex, { str: 15, dex: 14, con: 13, int: 12, wis: 10, cha: 8 }),
       },
       {
         classDoc,
@@ -569,6 +602,8 @@ describe("level-1 construction", () => {
         levelDoc: srdGet.level(classIndex, 1),
         equipmentCategories: categories,
         equipmentDocs: srd.equipment(),
+        traitDocs: srd.traits(),
+        spellDocs: srd.spells(),
       },
     );
 

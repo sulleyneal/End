@@ -25,6 +25,8 @@ const createSchema = z.object({
   // the table beside standard-array characters. The builder never offers it;
   // it stays an internal method for fixtures and DM-authored NPCs.
   scoreMethod: z.enum(["standard-array", "point-buy"]),
+  cantripChoices: z.array(z.string().max(64)).max(8).optional(),
+  spellChoices: z.array(z.string().max(64)).max(12).optional(),
   skillChoices: z.array(z.string().max(60)).max(6).default([]),
   raceProficiencyChoices: z.array(z.string().max(60)).max(6).optional(),
   equipmentSelections: z

@@ -8,12 +8,14 @@ import {
   type SrdLevel,
   type SrdOption,
   type SrdRace,
+  type SrdSpell,
   type SrdSubrace,
   type SrdTrait,
 } from "@/srd/types";
 import { abilityModifier } from "./character";
 import { type EquipmentSelection, resolveStartingEquipment } from "./equipment";
 import { resolveTraits } from "./traits";
+import { spellListFor, spellcastingPlan } from "./spells";
 
 /**
  * Legal character construction.
@@ -136,6 +138,10 @@ export type BuildRequest = {
   raceProficiencyChoices?: string[];
   /** One branch per class starting-equipment block. */
   equipmentSelections?: EquipmentSelection[];
+  /** Cantrip indexes, for a class that knows cantrips. */
+  cantripChoices?: string[];
+  /** Levelled spell indexes: known spells, or a wizard's opening spellbook. */
+  spellChoices?: string[];
 };
 
 export type BuiltCharacter = {
@@ -162,6 +168,7 @@ export type BuiltCharacter = {
   proficiencies: { kind: string; proficiencyIndex: string; source: string }[];
   items: { itemIndex: string; quantity: number; equipped: boolean }[];
   spellSlots: { level: number; max: number; used: number }[];
+  spells: { spellIndex: string; prepared: boolean; alwaysPrepared: boolean }[];
 };
 
 const kindOf = (index: string): string => {
@@ -180,6 +187,8 @@ export type BuildContext = {
   equipmentCategories?: Pick<SrdEquipmentCategory, "index" | "equipment">[];
   /** Racial trait documents, the source of trait-granted proficiencies. */
   traitDocs?: SrdTrait[];
+  /** The class's spell list, needed to validate cantrip and spell picks. */
+  spellDocs?: SrdSpell[];
   /** Armour lookup, so the starting kit can be worn rather than carried. */
   equipmentDocs?: Pick<
     SrdEquipment,
@@ -311,7 +320,71 @@ export function buildLevel1Character(
     }
   }
 
+  /* --- Spells known and prepared --- */
+  const spells: BuiltCharacter["spells"] = [];
+  const castingAbility = ctx.classDoc.spellcasting?.spellcasting_ability?.index as
+    | AbilityKey
+    | undefined;
+
+  if (casting && castingAbility) {
+    const abilityScore =
+      request.scores[castingAbility] +
+      (ctx.raceDoc.ability_bonuses ?? [])
+        .filter((b) => b.ability_score.index === castingAbility)
+        .reduce((sum, b) => sum + b.bonus, 0) +
+      (ctx.subraceDoc?.ability_bonuses ?? [])
+        .filter((b) => b.ability_score.index === castingAbility)
+        .reduce((sum, b) => sum + b.bonus, 0);
+
+    const plan = spellcastingPlan({
+      classIndex: request.classIndex,
+      level: 1,
+      cantripsKnown: (casting.cantrips_known ?? 0) + traits.extraCantrips,
+      spellsKnown: casting.spells_known,
+      castingModifier: abilityModifier(abilityScore),
+    });
+
+    if (plan) {
+      const list = spellListFor(ctx.spellDocs ?? [], request.classIndex, 1);
+      const cantripOptions = new Set(list.filter((s) => s.level === 0).map((s) => s.index));
+      const spellOptions = new Set(list.filter((s) => s.level === 1).map((s) => s.index));
+
+      const cantrips = [...new Set(request.cantripChoices ?? [])];
+      if (cantrips.length !== plan.cantrips) {
+        throw new BuildError(
+          `${ctx.classDoc.name} chooses exactly ${plan.cantrips} cantrip${
+            plan.cantrips === 1 ? "" : "s"
+          }; got ${cantrips.length}.`,
+        );
+      }
+      for (const index of cantrips) {
+        if (!cantripOptions.has(index)) {
+          throw new BuildError(`"${index}" is not a ${ctx.classDoc.name} cantrip.`);
+        }
+        spells.push({ spellIndex: index, prepared: true, alwaysPrepared: true });
+      }
+
+      const chosen = [...new Set(request.spellChoices ?? [])];
+      if (chosen.length !== plan.spells) {
+        throw new BuildError(
+          `${ctx.classDoc.name} chooses exactly ${plan.spells} level 1 spell${
+            plan.spells === 1 ? "" : "s"
+          }; got ${chosen.length}.`,
+        );
+      }
+      for (const index of chosen) {
+        if (!spellOptions.has(index)) {
+          throw new BuildError(`"${index}" is not a level 1 ${ctx.classDoc.name} spell.`);
+        }
+        spells.push({ spellIndex: index, prepared: true, alwaysPrepared: false });
+      }
+    }
+  } else if ((request.cantripChoices ?? []).length || (request.spellChoices ?? []).length) {
+    throw new BuildError(`${ctx.classDoc.name} does not cast spells at level 1.`);
+  }
+
   return {
+    spells,
     character: {
       name: request.name.trim(),
       race: request.raceIndex,

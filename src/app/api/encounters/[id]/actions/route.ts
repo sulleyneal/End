@@ -9,6 +9,7 @@ import {
   moveCombatant,
   performAttack,
   performDeathSave,
+  castSpellAction,
 } from "@/server/encounters";
 import { readJson, route } from "@/server/http";
 
@@ -31,6 +32,14 @@ const actionSchema = z.discriminatedUnion("type", [
     path: z
       .array(z.object({ x: z.number().int().min(0).max(200), y: z.number().int().min(0).max(200) }))
       .max(60),
+  }),
+  z.object({
+    type: z.literal("cast"),
+    combatantId: z.string().uuid(),
+    spellIndex: z.string().min(1).max(64),
+    /** 0 for a cantrip; otherwise the slot level being spent. */
+    slotLevel: z.number().int().min(0).max(9),
+    targetIds: z.array(z.string().uuid()).max(12).default([]),
   }),
   z.object({ type: z.literal("end-turn"), combatantId: z.string().uuid() }),
   z.object({ type: z.literal("death-save"), combatantId: z.string().uuid() }),
@@ -81,6 +90,16 @@ export const POST = route(
           path: body.path,
         });
         return Response.json(result);
+      }
+      case "cast": {
+        const report = await castSpellAction({
+          encounterId: id,
+          combatantId: body.combatantId,
+          spellIndex: body.spellIndex,
+          slotLevel: body.slotLevel,
+          targetIds: body.targetIds,
+        });
+        return Response.json(report);
       }
       case "end-turn":
         return Response.json({ encounter: await endTurn(id, body.combatantId) });
