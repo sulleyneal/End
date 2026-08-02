@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { campaignArcs, campaigns, locations, npcs, plotThreads, quests, worldFacts } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { appendEvent, postMessage } from "@/server/events";
-import { DM_MODEL, anthropic } from "./client";
+import { CAMPAIGN_MODEL, anthropic } from "./client";
 import { ensureOpenSession } from "./recap";
 
 /**
@@ -183,7 +183,7 @@ export async function generateCampaign(params: {
     .join("\n");
 
   const response = await anthropic().messages.create({
-    model: DM_MODEL,
+    model: CAMPAIGN_MODEL,
     max_tokens: 8000,
     system: SYSTEM_PROMPT,
     tools: [GENERATION_TOOL],
