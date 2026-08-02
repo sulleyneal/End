@@ -776,8 +776,23 @@ export async function endTurn(encounterId: string, combatantId: string): Promise
     .where(eq(combatants.id, actor.id));
 
   const total = encounter.combatants.length;
-  let nextIndex = encounter.turnIndex;
   let round = encounter.round;
+
+  // Advance from whoever actually just acted, not from the stored turnIndex.
+  //
+  // Those are the same thing until somebody dies on their own turn: then
+  // turnIndex is left pointing at the corpse while getEncounter scans forward
+  // to find the real active combatant. Stepping from the stale index handed the
+  // next combatant in order a second turn with a fresh action — a monster took
+  // two attacks in one round — and, when the corpse was last in initiative, the
+  // wrap that getEncounter did silently was never counted, so the round number
+  // ran a turn short.
+  const actorIndex = encounter.combatants.findIndex((c) => c.id === actor.id);
+  let nextIndex = actorIndex >= 0 ? actorIndex : encounter.turnIndex;
+
+  // Everything from the stored index up to the actor was skipped over as dead;
+  // if that scan wrapped, the round already turned over.
+  if (actorIndex >= 0 && actorIndex < encounter.turnIndex) round += 1;
 
   // Skip anyone already out of the fight; stop if nobody is left standing.
   for (let step = 0; step < total; step++) {
@@ -1165,9 +1180,21 @@ export function redactEncounter(view: EncounterView, canCommandMonsters: boolean
     ...view,
     combatants: view.combatants.map((c) => {
       if (c.characterId || canCommandMonsters) return c;
-      // The client renders a foe as a wound bar from the hp ratio, which is
-      // what a DM describes out loud, so it needs no stat block to do its job.
-      return { ...c, stats: null, attacks: [] };
+      // Nulling `stats` hid saves, immunities and attack bonuses but left exact
+      // hit points and armour class in the clear, so a table could still work
+      // out the number they need to hit and how many points were left. The
+      // client only draws a wound bar, so it gets the ratio and nothing else:
+      // hpMax is normalised to 100 and hpCurrent becomes the percentage.
+      const share = c.hpMax > 0 ? Math.round((c.hpCurrent / c.hpMax) * 100) : 0;
+      return {
+        ...c,
+        stats: null,
+        attacks: [],
+        hpCurrent: c.hpCurrent > 0 ? Math.max(1, share) : 0,
+        hpMax: 100,
+        tempHp: 0,
+        ac: 0,
+      };
     }),
   };
 }

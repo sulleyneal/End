@@ -13,10 +13,11 @@ import { rollAbilityScores } from "@/rules/build";
  * rolled — otherwise a client could simply claim six 18s, which is precisely
  * the hole the standard-array and point-buy validation exists to close.
  *
- * Rolling again replaces the unused roll rather than adding one, so a player
- * cannot keep the best of twenty attempts. Whether to allow that at all is a
- * table's own business; this app takes the common position that you roll once
- * and live with it.
+ * You roll once per campaign. Guarding only on "is there an unused roll" was
+ * not enough: building a character spends the roll, which re-opened rolling, so
+ * a player could roll, build a throwaway, roll again, and keep the best of five
+ * — leaving four junk characters in the party. The count is per campaign
+ * membership instead, which is the thing a player actually has one of.
  */
 
 export const runtime = "nodejs";
@@ -47,22 +48,20 @@ export const POST = route(async (_req: Request, ctx: RouteContext<"/api/campaign
   const { id } = await ctx.params;
   const { user } = await requireMembership(id);
 
+  // Any roll at this table, spent or not — one roll per player per campaign.
   const [existing] = await db
     .select()
     .from(abilityRolls)
-    .where(
-      and(
-        eq(abilityRolls.campaignId, id),
-        eq(abilityRolls.userId, user.id),
-        isNull(abilityRolls.usedAt),
-      ),
-    )
+    .where(and(eq(abilityRolls.campaignId, id), eq(abilityRolls.userId, user.id)))
+    .orderBy(desc(abilityRolls.createdAt))
     .limit(1);
 
   if (existing) {
     return Response.json(
       {
-        error: "You have already rolled for this character. Use those scores or pick another method.",
+        error: existing.usedAt
+          ? "You have already rolled at this table and used it. Standard array is available for another character."
+          : "You have already rolled for this character. Use those scores or pick another method.",
         roll: { scores: existing.scores, rolls: existing.rolls },
       },
       { status: 409 },

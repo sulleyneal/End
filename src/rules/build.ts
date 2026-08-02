@@ -551,8 +551,10 @@ export function rollAbilityScores(rng: Rng = cryptoRng): {
     rolls.push({ dice, dropped, total });
   }
 
-  return {
-    scores: rolls.map((r) => r.total).sort((a, b) => b - a),
-    rolls,
-  };
+  // Sorted together, so scores[i] is the total of rolls[i]. Sorting only the
+  // totals left the two arrays disagreeing, and any display pairing them by
+  // index attributed the wrong dice to the wrong score.
+  rolls.sort((a, b) => b.total - a.total);
+
+  return { scores: rolls.map((r) => r.total), rolls };
 }
