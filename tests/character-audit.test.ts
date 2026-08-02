@@ -946,3 +946,35 @@ describe("trait-granted spells", () => {
     ).toThrow(/grants no extra spells/);
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * Ability Score Improvements
+ *
+ * The SRD level document carries the cumulative count per class, so the
+ * schedule is data rather than transcription. A level-20 fighter was
+ * previously stuck at his starting Strength across seven missed ASIs.
+ * ------------------------------------------------------------------ */
+
+describe("ASI schedule comes from the SRD", () => {
+  const asisAt = (classIndex: string, level: number) =>
+    srd.levels().find((l) => l.index === `${classIndex}-${level}`)?.ability_score_bonuses ?? 0;
+
+  it("matches the PHB for a fighter, who gets extra ones", () => {
+    // PHB: fighters gain ASIs at 4, 6, 8, 12, 14, 16 and 19 — seven by level 20.
+    expect(asisAt("fighter", 3)).toBe(0);
+    expect(asisAt("fighter", 4)).toBe(1);
+    expect(asisAt("fighter", 6)).toBe(2);
+    expect(asisAt("fighter", 8)).toBe(3);
+    expect(asisAt("fighter", 20)).toBe(7);
+  });
+
+  it("matches the PHB for a class on the standard schedule", () => {
+    // 4, 8, 12, 16, 19 — five by level 20.
+    expect(asisAt("wizard", 4)).toBe(1);
+    expect(asisAt("wizard", 8)).toBe(2);
+    expect(asisAt("wizard", 12)).toBe(3);
+    expect(asisAt("wizard", 16)).toBe(4);
+    expect(asisAt("wizard", 19)).toBe(5);
+    expect(asisAt("wizard", 20)).toBe(5);
+  });
+});

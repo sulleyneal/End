@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { and, asc, desc, eq, gt } from "drizzle-orm";
 import { db } from "@/db";
-import { encounters, messages, rolls, sessionLogs } from "@/db/schema";
+import { combatants, encounters, messages, rolls, sessionLogs } from "@/db/schema";
 import { appendEvent, postMessage } from "@/server/events";
 import { PARSER_MODEL, anthropic } from "./client";
 
@@ -51,7 +51,15 @@ const SYSTEM_PROMPT = `You write session recaps for a D&D campaign journal.
 You are summarising a transcript, not inventing story. Every fact in your recap
 must appear in the log you are given. If the party did not do something, it did
 not happen. Prefer the concrete — names, places, what was said and decided — over
-mood. No game statistics, no dice results, no hit points.`;
+mood. No game statistics, no dice results, no hit points.
+
+You will be given a COMBAT FACTS section. It is generated from the game's own
+database and is the *only* source for what happened in a fight: who died, who
+went down, who was still standing. Do not state that anyone was killed, wounded,
+healed, saved or defeated unless that section says so. If a creature is not
+listed as killed, it did not die. If nobody is listed as healed, nobody was
+healed. When the log is thin, write less — a short accurate recap is worth more
+than a full-looking invented one.`;
 
 /**
  * Ends the current session and writes its recap into the journal.
@@ -103,15 +111,45 @@ export async function endSessionWithRecap(campaignId: string): Promise<{
       .limit(10),
   ]);
 
-  const mechanical = combatRolls
-    .filter((r) => ["attack", "damage", "death_save", "save"].includes(r.kind))
-    .map((r) => {
-      const target = r.targetName ? ` vs ${r.targetName}` : "";
-      const outcome = r.outcome ? ` — ${r.outcome}` : "";
-      return `${r.actorName}: ${r.kind}${target} ${r.total}${outcome}`;
-    })
-    .join("\n")
-    .slice(0, 12000);
+  // A digest of what the database actually says, not a pile of dice lines.
+  //
+  // Feeding raw rolls let the model confabulate: it wrote that a cleric "pulled
+  // Cyra back from death's edge" when the only healing in the log targeted
+  // someone else, and that a monster "finally fell" when it ended at 330 of 400
+  // hit points. Bare numbers with no linkage are an invitation to fill gaps, so
+  // the outcomes are computed here and stated flatly instead.
+  const fightFacts: string[] = [];
+  for (const fight of fights) {
+    const roster = await db
+      .select()
+      .from(combatants)
+      .where(eq(combatants.encounterId, fight.id));
+
+    const fallen = roster.filter((c) => c.defeated).map((c) => c.name);
+    const downed = roster
+      .filter((c) => !c.defeated && c.hpCurrent === 0)
+      .map((c) => c.name);
+    const survivors = roster
+      .filter((c) => !c.defeated && c.hpCurrent > 0)
+      .map((c) => `${c.name} on ${c.hpCurrent} of ${c.hpMax}`);
+
+    fightFacts.push(
+      [
+        `Encounter "${fight.name}" (${fight.status}, ${fight.round} rounds).`,
+        fallen.length > 0 ? `Killed or destroyed: ${fallen.join(", ")}.` : "Nobody died.",
+        downed.length > 0 ? `Left unconscious at 0 HP: ${downed.join(", ")}.` : "",
+        survivors.length > 0 ? `Still standing at the end: ${survivors.join("; ")}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+  }
+
+  const deathSaves = combatRolls
+    .filter((r) => r.kind === "death_save")
+    .map((r) => `${r.actorName} rolled a death save: ${r.outcome ?? "unknown"}.`);
+
+  const mechanical = [...fightFacts, ...deathSaves].join("\n").slice(0, 12000);
 
   const rendered = playable
     .map((m) => `${m.authorName} (${m.kind}): ${m.content}`)
@@ -129,14 +167,10 @@ export async function endSessionWithRecap(campaignId: string): Promise<{
         role: "user",
         content: [
           `Session log:\n\n${rendered}`,
-          fights.length > 0
-            ? `\n\nEncounters this session: ${fights
-                .map((f) => `${f.name} (${f.status}, ${f.round} rounds)`)
-                .join("; ")}`
-            : "",
+
           mechanical
-            ? `\n\nDice record — use this for what happened in combat, but write it as story, never as numbers:\n${mechanical}`
-            : "",
+            ? `\n\nCOMBAT FACTS (authoritative; nothing else about combat may be claimed):\n${mechanical}`
+            : "\n\nCOMBAT FACTS: no combat took place this session.",
         ].join(""),
       },
     ],
@@ -249,4 +283,45 @@ export async function summariseMissed(lines: string[]): Promise<string | null> {
     .trim();
 
   return text.length > 0 ? text : null;
+}
+
+/** A gap this long between beats means the group stopped playing. */
+const SESSION_GAP_HOURS = 6;
+
+/**
+ * Closes a session that has clearly ended, and opens the next one.
+ *
+ * The done-bar asks for the recap to generate "automatically at session end",
+ * and a virtual table has no obvious end — nobody pushes back a chair. The
+ * usable signal is a gap: when the next thing happens hours after the last, the
+ * session that came before it is over. Called at the start of a DM turn, so the
+ * player who comes back on Thursday finds Tuesday already written up.
+ *
+ * Returns the session number written, or null when nothing needed closing.
+ */
+export async function closeStaleSession(campaignId: string): Promise<number | null> {
+  const [open] = await db
+    .select()
+    .from(sessionLogs)
+    .where(eq(sessionLogs.campaignId, campaignId))
+    .orderBy(desc(sessionLogs.number))
+    .limit(1);
+
+  if (!open || open.endedAt !== null) return null;
+
+  const [last] = await db
+    .select({ createdAt: messages.createdAt })
+    .from(messages)
+    .where(and(eq(messages.campaignId, campaignId), gt(messages.createdAt, open.startedAt)))
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+
+  if (!last) return null;
+
+  const idleHours = (Date.now() - last.createdAt.getTime()) / 3_600_000;
+  if (idleHours < SESSION_GAP_HOURS) return null;
+
+  const session = await endSessionWithRecap(campaignId);
+  await ensureOpenSession(campaignId);
+  return session?.number ?? null;
 }

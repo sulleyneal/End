@@ -19,6 +19,7 @@ import { resolveSave } from "@/rules/combat";
 import { combineAdvantage, rollD20 } from "@/rules/dice";
 import type { AbilityKey } from "@/srd/types";
 import { applyLevelUps, listCharacters } from "@/server/characters";
+import { closeStaleSession } from "./recap";
 import { getActiveEncounter, performAttack, startEncounter } from "@/server/encounters";
 import { appendEvent } from "@/server/events";
 import { DM_MODEL, anthropic } from "./client";
@@ -698,6 +699,16 @@ export async function runDmTurn(params: {
 
   if (params.ooc) {
     return { entries: ctx.entries, toolCalls: [], stoppedBecause: "end_turn" };
+  }
+
+  // If the table has been quiet for hours, the last session is over: write it
+  // up before this turn starts a new one, so the recap lands without anyone
+  // having to remember to ask for it.
+  try {
+    await closeStaleSession(params.campaignId);
+  } catch (error) {
+    // A missing recap must never block someone taking their turn.
+    console.error("Session close failed", error);
   }
 
   await appendEvent(params.campaignId, "dm.thinking", { actorName: params.actorName });

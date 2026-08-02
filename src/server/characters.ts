@@ -345,6 +345,36 @@ export async function applyLevelUps(characterId: string): Promise<number> {
     hpMax += Math.max(1, averagePerLevel + conMod + traits.hpPerLevel);
   }
 
+  // Ability Score Improvements. The SRD level document carries the cumulative
+  // count per class — a fighter has 7 by level 20, a wizard 5 — so the schedule
+  // is read, not transcribed.
+  //
+  // Each is applied as +1 to both of the class's saving-throw abilities, which
+  // is always a legal allocation and always useful. A player should get to
+  // choose their own; until that exists, a legal default keeps every derived
+  // number correct instead of leaving a level-20 fighter stuck at his starting
+  // Strength. Scores cap at 20.
+  const before = srd.levels().find((l) => l.index === `${row.class}-${row.level}`);
+  const after = srd.levels().find((l) => l.index === `${row.class}-${earned}`);
+  const improvements = (after?.ability_score_bonuses ?? 0) - (before?.ability_score_bonuses ?? 0);
+
+  const scores: Record<string, number> = {
+    str: row.str,
+    dex: row.dex,
+    con: row.con,
+    int: row.int,
+    wis: row.wis,
+    cha: row.cha,
+  };
+  if (improvements > 0) {
+    const targets = classDoc.saving_throws.map((t) => t.index);
+    for (let i = 0; i < improvements; i++) {
+      for (const ability of targets) {
+        if (scores[ability] !== undefined && scores[ability] < 20) scores[ability] += 1;
+      }
+    }
+  }
+
   await db
     .update(characters)
     .set({
@@ -353,6 +383,12 @@ export async function applyLevelUps(characterId: string): Promise<number> {
       // Levelling does not heal, but it does raise the ceiling.
       hpCurrent: row.hpCurrent > 0 ? row.hpCurrent + (hpMax - row.hpMax) : row.hpCurrent,
       hitDiceRemaining: Math.min(earned, row.hitDiceRemaining + gained),
+      str: scores.str,
+      dex: scores.dex,
+      con: scores.con,
+      int: scores.int,
+      wis: scores.wis,
+      cha: scores.cha,
     })
     .where(eq(characters.id, characterId));
 
