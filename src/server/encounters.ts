@@ -378,13 +378,35 @@ export async function getEncounter(encounterId: string): Promise<EncounterView> 
   // and the one-active-encounter rule meant the campaign could never fight
   // again. Dying is the outcome the death-save system exists to produce, so it
   // must not be the thing that ends the game.
+  // Skipping past a corpse is *committed*, not recomputed on every read.
+  //
+  // Scanning without persisting left `turnIndex` pointing at the dead and the
+  // round bump owed until the next endTurn — so for that whole turn the stored
+  // round was one behind what was actually being played. Players saw the wrong
+  // round, the DM's memory projection was handed the wrong round every turn,
+  // and the journal understated how long a fight ran. Writing the corrected
+  // pointer here keeps the invariant that `round` is always the round of the
+  // combatant whose turn it is. It self-heals once and then stops writing.
   const living = view.filter((c) => !c.defeated);
   let active: string | null = null;
+  let turnIndex = encounter.turnIndex;
+  let round = encounter.round;
+
   if (encounter.status === "active" && living.length > 0 && view.length > 0) {
     for (let step = 0; step < view.length; step++) {
-      const candidate = view[(encounter.turnIndex + step) % view.length];
+      const index = (encounter.turnIndex + step) % view.length;
+      const candidate = view[index];
       if (candidate && !candidate.defeated) {
         active = candidate.id;
+        if (step > 0) {
+          turnIndex = index;
+          // Wrapping the end of the initiative order is a new round.
+          if (index < encounter.turnIndex) round = encounter.round + 1;
+          await db
+            .update(encounters)
+            .set({ turnIndex, round })
+            .where(eq(encounters.id, encounter.id));
+        }
         break;
       }
     }
@@ -400,8 +422,8 @@ export async function getEncounter(encounterId: string): Promise<EncounterView> 
     mapId: encounter.mapId,
     name: encounter.name,
     status: encounter.status,
-    round: encounter.round,
-    turnIndex: encounter.turnIndex,
+    round,
+    turnIndex,
     combatants: view,
     map: mapRow
       ? {
@@ -778,21 +800,15 @@ export async function endTurn(encounterId: string, combatantId: string): Promise
   const total = encounter.combatants.length;
   let round = encounter.round;
 
-  // Advance from whoever actually just acted, not from the stored turnIndex.
+  // Advance from whoever actually just acted.
   //
-  // Those are the same thing until somebody dies on their own turn: then
-  // turnIndex is left pointing at the corpse while getEncounter scans forward
-  // to find the real active combatant. Stepping from the stale index handed the
-  // next combatant in order a second turn with a fresh action — a monster took
-  // two attacks in one round — and, when the corpse was last in initiative, the
-  // wrap that getEncounter did silently was never counted, so the round number
-  // ran a turn short.
+  // Stepping from the stored turnIndex instead handed the next combatant in
+  // order a second turn with a fresh action economy whenever somebody died on
+  // their own turn — a monster took two attacks in one round. getEncounter
+  // commits the skip past a corpse, so the two are in step again, but advancing
+  // from the actor is the honest expression of what this does.
   const actorIndex = encounter.combatants.findIndex((c) => c.id === actor.id);
   let nextIndex = actorIndex >= 0 ? actorIndex : encounter.turnIndex;
-
-  // Everything from the stored index up to the actor was skipped over as dead;
-  // if that scan wrapped, the round already turned over.
-  if (actorIndex >= 0 && actorIndex < encounter.turnIndex) round += 1;
 
   // Skip anyone already out of the fight; stop if nobody is left standing.
   for (let step = 0; step < total; step++) {
