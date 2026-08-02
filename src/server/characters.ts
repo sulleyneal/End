@@ -1,15 +1,17 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  abilityRolls,
   characterItems,
   characterProficiencies,
   characterSpells,
   characters,
   spellSlots,
 } from "@/db/schema";
-import { type BuildRequest, buildLevel1Character } from "@/rules/build";
+import { BuildError, type BuildRequest, buildLevel1Character } from "@/rules/build";
 import { type DerivedCharacter, deriveCharacter } from "@/rules/character";
 import { srd, srdGet } from "@/srd/local";
+import { ABILITIES } from "@/srd/types";
 import { abilityModifier, levelForXp } from "@/rules/character";
 import { resolveTraits } from "@/rules/traits";
 import { NotFoundError } from "./http";
@@ -68,6 +70,37 @@ export async function createCharacter(params: {
   const subraceDoc = request.subraceIndex ? srdGet.subrace(request.subraceIndex) : null;
   const levelDoc = srd.levels().find((l) => l.index === `${request.classIndex}-1`) ?? null;
 
+  // A rolled set must match the scores the server rolled for this player, as a
+  // multiset — they may arrange them however they like, but not change them.
+  let rollId: string | null = null;
+  if (request.scoreMethod === "rolled") {
+    const [pending] = await db
+      .select()
+      .from(abilityRolls)
+      .where(
+        and(
+          eq(abilityRolls.campaignId, params.campaignId),
+          eq(abilityRolls.userId, params.userId),
+          isNull(abilityRolls.usedAt),
+        ),
+      )
+      .orderBy(desc(abilityRolls.createdAt))
+      .limit(1);
+
+    if (!pending) {
+      throw new BuildError("Roll your ability scores before building with them.");
+    }
+
+    const claimed = ABILITIES.map((k) => request.scores[k]).sort((a, b) => b - a);
+    const actual = [...pending.scores].sort((a, b) => b - a);
+    if (claimed.join(",") !== actual.join(",")) {
+      throw new BuildError(
+        `Those are not the scores you rolled. You rolled ${actual.join(", ")}.`,
+      );
+    }
+    rollId = pending.id;
+  }
+
   // Throws BuildError on any illegal choice; nothing is written until it passes.
   const built = buildLevel1Character(request, {
     classDoc,
@@ -109,6 +142,14 @@ export async function createCharacter(params: {
         equipped: i.equipped,
       })),
     );
+  }
+
+  // Spent, so it cannot be reused for a second character.
+  if (rollId) {
+    await db
+      .update(abilityRolls)
+      .set({ usedAt: new Date() })
+      .where(eq(abilityRolls.id, rollId));
   }
 
   if (built.spells.length > 0) {

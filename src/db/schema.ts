@@ -218,6 +218,33 @@ export const authAttempts = pgTable(
   (t) => [index("auth_attempts_lookup_idx").on(t.fingerprint, t.kind, t.createdAt)],
 );
 
+/**
+ * Ability scores a player rolled for a character they have not built yet.
+ *
+ * Rolling happens server-side like every other die, and the result is stored
+ * so the build can be checked against it. Without that a client could simply
+ * claim it had rolled six 18s.
+ */
+export const abilityRolls = pgTable(
+  "ability_rolls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    /** The six totals, highest first. */
+    scores: jsonb("scores").$type<number[]>().notNull(),
+    /** Every die face, including the dropped one, so the roll is auditable. */
+    rolls: jsonb("rolls").$type<{ dice: number[]; dropped: number; total: number }[]>().notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ability_rolls_lookup_idx").on(t.userId, t.campaignId, t.createdAt)],
+);
+
 export const campaigns = pgTable(
   "campaigns",
   {

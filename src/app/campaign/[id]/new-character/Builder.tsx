@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { suggestAssignment } from "@/rules/build";
 import { Button, Card, ErrorNote, Field, inputClass } from "@/components/ui";
 
 /**
@@ -92,6 +93,12 @@ export default function Builder({ campaignId }: { campaignId: string }) {
   });
   const [skillChoices, setSkillChoices] = useState<string[]>([]);
   const [racePicks, setRacePicks] = useState<string[]>([]);
+  const [method, setMethod] = useState<"standard-array" | "rolled">("standard-array");
+  const [rolled, setRolled] = useState<{
+    scores: number[];
+    rolls: { dice: number[]; dropped: number; total: number }[];
+  } | null>(null);
+  const [rolling, setRolling] = useState(false);
   const [equipment, setEquipment] = useState<Record<number, { option: number; picks: string[] }>>({});
   const [cantripPicks, setCantripPicks] = useState<string[]>([]);
   const [spellPicks, setSpellPicks] = useState<string[]>([]);
@@ -117,6 +124,16 @@ export default function Builder({ campaignId }: { campaignId: string }) {
   if (lastClass !== classIndex) {
     setLastClass(classIndex);
     setSkillChoices([]);
+    // Re-arrange for the new class. Racial bonuses are not in scope during this
+    // render-phase reset, and they only ever break ties, so the plain order is
+    // used here; the "Arrange for X" button applies the tie-break version.
+    setAssignment(
+      suggestFor(
+        classIndex,
+        method === "rolled" && rolled ? rolled.scores : [...STANDARD_ARRAY],
+        {},
+      ),
+    );
     setCantripPicks([]);
     setSpellPicks([]);
     const defaults: Record<number, { option: number; picks: string[] }> = {};
@@ -153,10 +170,14 @@ export default function Builder({ campaignId }: { campaignId: string }) {
     setEquipment(defaults);
   }, [classDoc]);
 
+  // Whichever method is in play, the same rule holds: every score in the pool
+  // used exactly once. The server checks it again, and for a rolled set checks
+  // it against the roll it actually made.
+  const pool = method === "rolled" && rolled ? rolled.scores : STANDARD_ARRAY;
   const arrayValid = useMemo(() => {
     const used = ABILITIES.map((a) => assignment[a]).sort((x, y) => y - x);
-    return used.join(",") === [...STANDARD_ARRAY].join(",");
-  }, [assignment]);
+    return used.join(",") === [...pool].sort((x, y) => y - x).join(",");
+  }, [assignment, pool]);
 
   // Prepared casters get modifier + level, so this moves as the player
   // reassigns ability scores. Known casters take the flat SRD number.
@@ -189,6 +210,45 @@ export default function Builder({ campaignId }: { campaignId: string }) {
     ? (casting.spellsKnown ?? (classIndex === "wizard" ? 6 : Math.max(1, castingMod + 1)))
     : 0;
 
+  const racialBonuses = (() => {
+    const out: Partial<Record<Ability, number>> = {};
+    for (const b of [...(raceDoc?.abilityBonuses ?? []), ...(subraceDoc?.abilityBonuses ?? [])]) {
+      out[b.ability as Ability] = (out[b.ability as Ability] ?? 0) + b.bonus;
+    }
+    return out;
+  })();
+
+  const rollScores = async () => {
+    setRolling(true);
+    setError("");
+    try {
+      const result = await api<{
+        roll: { scores: number[]; rolls: { dice: number[]; dropped: number; total: number }[] };
+      }>(`/api/campaigns/${campaignId}/roll-abilities`, { method: "POST" });
+      setRolled(result.roll);
+      setMethod("rolled");
+      setAssignment(suggestFor(classIndex, result.roll.scores, racialBonuses));
+    } catch (e) {
+      // A roll already exists: use it rather than letting the player roll again.
+      try {
+        const existing = await api<{
+          roll: { scores: number[]; rolls: { dice: number[]; dropped: number; total: number }[] } | null;
+        }>(`/api/campaigns/${campaignId}/roll-abilities`);
+        if (existing.roll) {
+          setRolled(existing.roll);
+          setMethod("rolled");
+          setAssignment(suggestFor(classIndex, existing.roll.scores, racialBonuses));
+        } else {
+          setError((e as Error).message);
+        }
+      } catch {
+        setError((e as Error).message);
+      }
+    } finally {
+      setRolling(false);
+    }
+  };
+
   const skillsNeeded = classDoc?.skills?.choose ?? 0;
   const raceNeeded = raceDoc?.proficiencyChoice?.choose ?? 0;
   const ready =
@@ -212,7 +272,7 @@ export default function Builder({ campaignId }: { campaignId: string }) {
           raceIndex,
           subraceIndex: subraceIndex || null,
           scores: assignment,
-          scoreMethod: "standard-array",
+          scoreMethod: method,
           skillChoices,
           cantripChoices: cantripsNeeded > 0 ? cantripPicks : undefined,
           spellChoices: spellsNeeded > 0 ? spellPicks : undefined,
@@ -323,10 +383,65 @@ export default function Builder({ campaignId }: { campaignId: string }) {
         <div>
           <h2 className="font-semibold">Ability scores</h2>
           <p className="text-sm text-[var(--muted)]">
-            Standard array — assign 15, 14, 13, 12, 10 and 8. Racial bonuses are added on your
-            sheet.
+            {method === "rolled"
+              ? "Rolled 4d6, dropping the lowest, six times. Racial bonuses are added on your sheet."
+              : "Standard array — assign 15, 14, 13, 12, 10 and 8. Racial bonuses are added on your sheet."}
           </p>
         </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setMethod("standard-array");
+              setAssignment(suggestFor(classIndex, [...STANDARD_ARRAY], racialBonuses));
+            }}
+            className={`rounded-lg border px-3 py-1.5 text-sm transition ${
+              method === "standard-array"
+                ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                : "border-[var(--border)]"
+            }`}
+          >
+            Standard array
+          </button>
+
+          <button
+            type="button"
+            data-testid="roll-abilities"
+            disabled={rolling}
+            onClick={() => void rollScores()}
+            className={`rounded-lg border px-3 py-1.5 text-sm transition disabled:opacity-40 ${
+              method === "rolled"
+                ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                : "border-[var(--border)]"
+            }`}
+          >
+            {rolling ? "Rolling…" : rolled ? "Rolled" : "Roll 4d6"}
+          </button>
+
+          <button
+            type="button"
+            data-testid="suggest-scores"
+            onClick={() => setAssignment(suggestFor(classIndex, [...pool], racialBonuses))}
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm transition hover:border-[var(--accent)]"
+          >
+            Arrange for {classDoc?.name ?? "class"}
+          </button>
+        </div>
+
+        {method === "rolled" && rolled && (
+          <div className="rounded-lg bg-[var(--surface-2)] px-3 py-2 text-xs text-[var(--muted)]">
+            <p className="mb-1">The server rolled these. You can arrange them, not change them.</p>
+            <ul className="grid gap-0.5 tabular sm:grid-cols-2">
+              {rolled.rolls.map((r, i) => (
+                <li key={i}>
+                  {r.dice.join(", ")} — drop {r.dropped} ={" "}
+                  <span className="font-semibold text-[var(--foreground)]">{r.total}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="grid gap-2 sm:grid-cols-2">
           {ABILITIES.map((ability) => (
             <label key={ability} className="flex items-center justify-between gap-3">
@@ -338,11 +453,13 @@ export default function Builder({ campaignId }: { campaignId: string }) {
                   setAssignment((prev) => ({ ...prev, [ability]: Number(e.target.value) }))
                 }
               >
-                {STANDARD_ARRAY.map((score) => (
-                  <option key={score} value={score}>
-                    {score}
-                  </option>
-                ))}
+                {[...new Set(pool)]
+                  .sort((a, b) => b - a)
+                  .map((score) => (
+                    <option key={score} value={score}>
+                      {score}
+                    </option>
+                  ))}
               </select>
             </label>
           ))}
@@ -600,4 +717,19 @@ function SpellPicker({
       </div>
     </div>
   );
+}
+
+
+/**
+ * Arranges a pool of scores for a class, best where the class wants it.
+ *
+ * A suggestion only — every box stays editable, and the server does not care
+ * how they are arranged as long as the multiset is right.
+ */
+function suggestFor(
+  classIndex: string,
+  scores: number[],
+  racialBonuses: Partial<Record<Ability, number>>,
+): Record<Ability, number> {
+  return suggestAssignment({ classIndex, scores, racialBonuses }) as Record<Ability, number>;
 }

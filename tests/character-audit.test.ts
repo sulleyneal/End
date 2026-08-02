@@ -8,7 +8,13 @@ import {
   levelForXp,
   xpToNextLevel,
 } from "@/rules/character";
-import { buildLevel1Character, skillOptionsFor } from "@/rules/build";
+import {
+  STANDARD_ARRAY,
+  buildLevel1Character,
+  skillOptionsFor,
+  suggestAssignment,
+  validateAbilityScores,
+} from "@/rules/build";
 import { equipmentChoicesFor } from "@/rules/equipment";
 import { resolveTraits } from "@/rules/traits";
 import { spellListFor, spellcastingPlan } from "@/rules/spells";
@@ -976,5 +982,42 @@ describe("ASI schedule comes from the SRD", () => {
     expect(asisAt("wizard", 16)).toBe(4);
     expect(asisAt("wizard", 19)).toBe(5);
     expect(asisAt("wizard", 20)).toBe(5);
+  });
+});
+
+describe("suggested ability arrangement", () => {
+  const array = [...STANDARD_ARRAY];
+
+  it("puts the best score where the class wants it", () => {
+    expect(
+      suggestAssignment({ classIndex: "wizard", scores: array, racialBonuses: {} }).int,
+    ).toBe(15);
+    expect(
+      suggestAssignment({ classIndex: "barbarian", scores: array, racialBonuses: {} }).str,
+    ).toBe(15);
+    // A monk wants Dexterity, not the Strength its saving throws imply.
+    expect(
+      suggestAssignment({ classIndex: "monk", scores: array, racialBonuses: {} }).dex,
+    ).toBe(15);
+  });
+
+  it("is always a legal standard array however it arranges", () => {
+    for (const classIndex of Object.keys(CLASS_TABLE)) {
+      const assignment = suggestAssignment({ classIndex, scores: array, racialBonuses: {} });
+      expect(() => validateAbilityScores(assignment, "standard-array")).not.toThrow();
+    }
+  });
+
+  it("avoids wasting a racial bonus on an odd score", () => {
+    // A hill dwarf cleric: +2 Con, +1 Wis. Wisdom 15 + 1 = 16 (+3) and
+    // Constitution 14 + 2 = 16 (+3) beats Wisdom 14 + 1 = 15 (+2).
+    const assignment = suggestAssignment({
+      classIndex: "cleric",
+      scores: array,
+      racialBonuses: { con: 2, wis: 1 },
+    });
+    const wis = assignment.wis + 1;
+    const con = assignment.con + 2;
+    expect(Math.floor((wis - 10) / 2) + Math.floor((con - 10) / 2)).toBeGreaterThanOrEqual(6);
   });
 });

@@ -13,6 +13,7 @@ import {
   type SrdTrait,
 } from "@/srd/types";
 import { abilityModifier } from "./character";
+import { type Rng, cryptoRng } from "./dice";
 import { type EquipmentSelection, resolveStartingEquipment } from "./equipment";
 import { resolveTraits } from "./traits";
 import { spellListFor, spellcastingPlan } from "./spells";
@@ -41,7 +42,7 @@ const POINT_BUY_COST: Record<number, number> = {
 export const POINT_BUY_BUDGET = 27;
 
 export type AbilityScores = Record<AbilityKey, number>;
-export type ScoreMethod = "standard-array" | "point-buy" | "manual";
+export type ScoreMethod = "standard-array" | "point-buy" | "rolled" | "manual";
 
 export class BuildError extends Error {
   constructor(message: string) {
@@ -69,6 +70,10 @@ export function validateAbilityScores(scores: AbilityScores, method: ScoreMethod
     }
     return;
   }
+
+  // A rolled set is checked against what the server actually rolled, which the
+  // caller passes in — there is nothing to validate from the numbers alone.
+  if (method === "rolled") return;
 
   if (method === "point-buy") {
     let spent = 0;
@@ -446,5 +451,108 @@ export function skillOptionsFor(classDoc: SrdClass): { choose: number; options: 
   return {
     choose: block.choose,
     options: optionIndexes(block.from.options).filter((i) => i.startsWith("skill-")),
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Suggested ability arrangement
+ * ------------------------------------------------------------------ */
+
+/**
+ * Which abilities each class wants, best first.
+ *
+ * This is advice, not a rule — every class can legally put any score anywhere,
+ * and the builder lets a player rearrange freely. It exists so that picking
+ * "barbarian" does not leave you staring at six empty boxes wondering where the
+ * 15 goes.
+ *
+ * It is written by hand because the SRD does not record a class's primary
+ * ability anywhere: `spellcasting_ability` covers only casters, and saving-throw
+ * proficiencies mislead for monks and paladins. No rules content is being
+ * transcribed here — nothing below changes what is legal.
+ */
+export const SUGGESTED_ABILITY_ORDER: Record<string, AbilityKey[]> = {
+  barbarian: ["str", "con", "dex", "wis", "cha", "int"],
+  bard: ["cha", "dex", "con", "wis", "int", "str"],
+  cleric: ["wis", "con", "str", "cha", "dex", "int"],
+  druid: ["wis", "con", "dex", "int", "cha", "str"],
+  fighter: ["str", "con", "dex", "wis", "cha", "int"],
+  monk: ["dex", "wis", "con", "str", "cha", "int"],
+  paladin: ["str", "cha", "con", "wis", "dex", "int"],
+  ranger: ["dex", "wis", "con", "str", "int", "cha"],
+  rogue: ["dex", "int", "con", "wis", "cha", "str"],
+  sorcerer: ["cha", "con", "dex", "wis", "int", "str"],
+  warlock: ["cha", "con", "dex", "wis", "int", "str"],
+  wizard: ["int", "con", "dex", "wis", "cha", "str"],
+};
+
+/**
+ * Lays a set of scores out across the abilities, best score to the ability the
+ * class wants most — then nudges for the race.
+ *
+ * Racial bonuses are applied after assignment, so a +2 already lands on the
+ * ability it lands on. What matters is the *odd* scores: a 15 with a +2 becomes
+ * 17, which is the same modifier as 16, so the spare point is wasted. Where two
+ * abilities are close in priority and one carries a racial bonus, this prefers
+ * the arrangement that does not throw a point away.
+ */
+export function suggestAssignment(params: {
+  classIndex: string;
+  scores: number[];
+  racialBonuses: Partial<Record<AbilityKey, number>>;
+}): Record<AbilityKey, number> {
+  const order = SUGGESTED_ABILITY_ORDER[params.classIndex] ?? [...ABILITIES];
+  const pool = [...params.scores].sort((a, b) => b - a);
+
+  const assignment = {} as Record<AbilityKey, number>;
+  order.forEach((ability, i) => {
+    assignment[ability] = pool[i] ?? 10;
+  });
+
+  // Look for a swap between neighbouring priorities that raises the total of
+  // the final modifiers — that is exactly the wasted-odd-point case.
+  const finalModifier = (ability: AbilityKey, score: number) =>
+    Math.floor((score + (params.racialBonuses[ability] ?? 0) - 10) / 2);
+
+  for (let i = 0; i < order.length - 1; i++) {
+    const a = order[i];
+    const b = order[i + 1];
+    const now = finalModifier(a, assignment[a]) + finalModifier(b, assignment[b]);
+    const swapped = finalModifier(a, assignment[b]) + finalModifier(b, assignment[a]);
+    if (swapped > now) {
+      const keep = assignment[a];
+      assignment[a] = assignment[b];
+      assignment[b] = keep;
+    }
+  }
+
+  return assignment;
+}
+
+/**
+ * Rolls a set of ability scores: 4d6, drop the lowest, six times (PHB 13).
+ *
+ * The dice come from the caller's RNG, which server-side is `crypto.randomInt`.
+ * Every face is returned, including the one dropped, so the roll can be shown
+ * to the table and audited later — a rolled character should be as inspectable
+ * as a rolled attack.
+ */
+export function rollAbilityScores(rng: Rng = cryptoRng): {
+  scores: number[];
+  rolls: { dice: number[]; dropped: number; total: number }[];
+} {
+  const rolls: { dice: number[]; dropped: number; total: number }[] = [];
+
+  for (let i = 0; i < 6; i++) {
+    const dice = [rng(6), rng(6), rng(6), rng(6)];
+    const sorted = [...dice].sort((a, b) => a - b);
+    const dropped = sorted[0];
+    const total = sorted.slice(1).reduce((sum, d) => sum + d, 0);
+    rolls.push({ dice, dropped, total });
+  }
+
+  return {
+    scores: rolls.map((r) => r.total).sort((a, b) => b - a),
+    rolls,
   };
 }

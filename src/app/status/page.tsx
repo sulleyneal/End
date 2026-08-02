@@ -82,6 +82,7 @@ const DONE = [
   "Campaigns, join codes, membership checks on every route",
   "Lossless realtime: per-campaign event log, cursor-resumed SSE",
   "Legal level-1 character creation with validated starting equipment and spells",
+  "Ability scores: standard array or 4d6-drop-lowest rolled server-side, arranged for your class",
   "Encounters: server-rolled initiative, turn gating, reach and range, resolved opportunity attacks",
   "Spellcasting: known and prepared spells, slots that get spent, upcasting, concentration",
   "Campaign generation: arc, NPCs, locations, plot threads and an opening scene",

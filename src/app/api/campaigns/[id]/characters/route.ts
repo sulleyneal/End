@@ -24,7 +24,8 @@ const createSchema = z.object({
   // validateAbilityScores, so a tampered client could post six 18s and sit at
   // the table beside standard-array characters. The builder never offers it;
   // it stays an internal method for fixtures and DM-authored NPCs.
-  scoreMethod: z.enum(["standard-array", "point-buy"]),
+  // "rolled" is safe because it is checked against the roll the server made.
+  scoreMethod: z.enum(["standard-array", "point-buy", "rolled"]),
   cantripChoices: z.array(z.string().max(64)).max(8).optional(),
   spellChoices: z.array(z.string().max(64)).max(12).optional(),
   skillChoices: z.array(z.string().max(60)).max(6).default([]),
