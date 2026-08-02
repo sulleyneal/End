@@ -10,6 +10,7 @@ import {
   performAttack,
   performDeathSave,
   castSpellAction,
+  redactEncounter,
 } from "@/server/encounters";
 import { readJson, route } from "@/server/http";
 
@@ -128,6 +129,8 @@ export const POST = route(
 export const GET = route(async (_req: Request, ctx: RouteContext<"/api/encounters/[id]/actions">) => {
   const { id } = await ctx.params;
   const encounter = await getEncounter(id);
-  await requireMembership(encounter.campaignId);
-  return Response.json({ encounter });
+  const { membership } = await requireMembership(encounter.campaignId);
+  return Response.json({
+    encounter: redactEncounter(encounter, membership.role === "co_dm"),
+  });
 });

@@ -4,7 +4,7 @@ import { messages, rolls } from "@/db/schema";
 import { requireMembership } from "@/server/auth";
 import { getCampaign } from "@/server/campaigns";
 import { listCharacters } from "@/server/characters";
-import { getActiveEncounter } from "@/server/encounters";
+import { getActiveEncounter, redactEncounter } from "@/server/encounters";
 import { currentSeq } from "@/server/events";
 import { NotFoundError, route } from "@/server/http";
 
@@ -71,7 +71,7 @@ export const GET = route(async (_req: Request, ctx: RouteContext<"/api/campaigns
       createdAt: r.createdAt.toISOString(),
     })),
     characters,
-    encounter,
+    encounter: encounter ? redactEncounter(encounter, membership.role === "co_dm") : null,
     cursor,
   });
 });

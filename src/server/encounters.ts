@@ -1130,3 +1130,25 @@ async function checkConcentration(params: {
 
   return { spellName, held: save.success };
 }
+
+/**
+ * Strips what a player is not supposed to know before an encounter leaves the
+ * server.
+ *
+ * A monster's stat block — saves, immunities, attack bonuses, CR — was sent
+ * verbatim to every member. The AI DM refuses to read those numbers out when
+ * asked, which made the refusal theatre while the API handed them over. A
+ * player sees a foe's name, position and how hurt it looks; a co-DM runs the
+ * monsters and needs their attacks.
+ */
+export function redactEncounter(view: EncounterView, canCommandMonsters: boolean): EncounterView {
+  return {
+    ...view,
+    combatants: view.combatants.map((c) => {
+      if (c.characterId || canCommandMonsters) return c;
+      // The client renders a foe as a wound bar from the hp ratio, which is
+      // what a DM describes out loud, so it needs no stat block to do its job.
+      return { ...c, stats: null, attacks: [] };
+    }),
+  };
+}
