@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { ErrorNote } from "@/components/ui";
 import { PortraitUpload } from "@/components/PortraitUpload";
+import { GearPanel, type GearItem } from "@/components/GearPanel";
 
 type Sheet = {
   id: string;
@@ -16,6 +17,7 @@ type Sheet = {
   conditions: string[];
   hasPortrait?: boolean;
   hitDiceRemaining?: number;
+  items?: GearItem[];
   slots?: { level: number; max: number; used: number }[];
   labels: { race: string; class: string; subrace: string | null };
   derived: {
@@ -109,6 +111,15 @@ export function PartyPanel({
                   </p>
                 )}
                 {isMine && <RestControls sheet={c} onChanged={onChanged} />}
+                {isMine && c.items && c.items.length > 0 && (
+                  <div className="mt-2">
+                    <GearPanel
+                      characterId={c.id}
+                      items={c.items}
+                      onChanged={() => onChanged?.()}
+                    />
+                  </div>
+                )}
               </li>
             );
           })}

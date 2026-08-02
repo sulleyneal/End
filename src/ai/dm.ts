@@ -428,6 +428,17 @@ async function executeTool(ctx: Ctx, name: string, rawInput: unknown): Promise<s
       if (!sheet && !combatant) return `There is nobody called "${input.target}" here.`;
 
       const apply = name === "apply_condition";
+
+      // A skeleton cannot be poisoned. Condition immunities come off the
+      // monster's own SRD stat block and were being collected but never
+      // consulted, so the DM could hand any condition to anything.
+      if (apply && combatant) {
+        const immunities = (combatant.stats as { conditionImmunities?: string[] } | null)
+          ?.conditionImmunities;
+        if (immunities?.includes(input.condition)) {
+          return `${combatant.name} is immune to being ${input.condition}. Narrate the attempt failing.`;
+        }
+      }
       const update = (existing: string[]) =>
         apply
           ? [...new Set([...existing, input.condition])]

@@ -91,6 +91,7 @@ const DONE = [
   "A what-you-missed catch-up when a player returns after being away",
   "Grid battle map with tap-to-move over server-validated movement",
   "Animated 3D dice that replay the roll the server already made",
+  "Gear panel: swap what you are holding, so a rogue can draw the rapier",
   "Uploadable character portraits, resized in the browser and stored in Postgres",
   "AI DM over tool-use intents — it cannot express a number that matters",
   "Table chat between the players — instant, free, and invisible to the DM",
@@ -103,14 +104,12 @@ const NEXT = [
   "Choosing where an Ability Score Improvement goes — a legal default is applied",
   "Halfling Lucky, cover, monster condition immunities and dragonborn breath are unimplemented",
   "Conditions applied by the DM have no duration and no expiry",
-  "Ranged attacks in melee do not yet take disadvantage",
   "Battle maps have no walls or difficult terrain yet — the engine enforces both, nothing authors them",
 ];
 
 /** Deliberately listed: an honest status page has to include what is wrong. */
 const KNOWN_GAPS = [
   "Every campaign generated before 1 Aug has no arc or opening scene",
-  "A rogue may end up wielding the dagger rather than the rapier, and there is no equip control",
   "The AI DM can remove a condition it did not apply, which is a way around the engine",
 ];
 

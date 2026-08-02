@@ -11,6 +11,7 @@ import {
   hitIsAutomaticCrit,
   maxHpAfterExhaustion,
   savingThrowModifiers,
+  rangedInMeleeDisadvantage,
 } from "./conditions";
 import { srd } from "@/srd/local";
 
@@ -169,5 +170,37 @@ describe("saving throws and checks", () => {
 
   it("leaves an unaffected creature rolling normally", () => {
     expect(abilityCheckModifiers(state([]))).toEqual({ advantage: false, disadvantage: false });
+  });
+});
+
+describe("ranged attacks in melee", () => {
+  const creature = (conditions: string[] = []) => ({ conditions, exhaustion: 0 });
+
+  it("has disadvantage with a hostile creature adjacent", () => {
+    expect(rangedInMeleeDisadvantage({ adjacentEnemies: [creature()] })).toEqual({
+      disadvantage: true,
+    });
+  });
+
+  it("has none with nobody adjacent", () => {
+    expect(rangedInMeleeDisadvantage({ adjacentEnemies: [] })).toEqual({ disadvantage: false });
+  });
+
+  it("ignores an enemy who cannot threaten", () => {
+    // PHB 195: the creature must be able to see you and not be incapacitated.
+    expect(
+      rangedInMeleeDisadvantage({ adjacentEnemies: [creature(["unconscious"])] }),
+    ).toEqual({ disadvantage: false });
+    expect(rangedInMeleeDisadvantage({ adjacentEnemies: [creature(["blinded"])] })).toEqual({
+      disadvantage: false,
+    });
+  });
+
+  it("applies when any one of several adjacent enemies can threaten", () => {
+    expect(
+      rangedInMeleeDisadvantage({
+        adjacentEnemies: [creature(["unconscious"]), creature()],
+      }),
+    ).toEqual({ disadvantage: true });
   });
 });

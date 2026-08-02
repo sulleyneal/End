@@ -182,6 +182,25 @@ export function maxHpAfterExhaustion(hpMax: number, exhaustion: number): number 
 }
 
 /** Advantage/disadvantage contributed by the *attacker's* own state. */
+/**
+ * A ranged attack made while an enemy is within 5 ft has disadvantage (PHB 195).
+ *
+ * Kept separate from the condition-derived modifiers because it depends on the
+ * battlefield rather than on the attacker's state: who else is standing next to
+ * them, and whether those creatures can actually threaten.
+ */
+export function rangedInMeleeDisadvantage(params: {
+  /** Hostile creatures within 5 ft of the attacker. */
+  adjacentEnemies: CreatureState[];
+}): { disadvantage: boolean } {
+  const threatening = params.adjacentEnemies.some((enemy) => {
+    const conditions = expandConditions(enemy.conditions);
+    // A blinded, incapacitated or unconscious creature does not threaten.
+    return !conditions.includes("incapacitated") && !conditions.includes("blinded");
+  });
+  return { disadvantage: threatening };
+}
+
 export function attackModifiersFor(state: CreatureState) {
   const effects = effectsOf(state);
   const ex = exhaustionEffects(state.exhaustion);

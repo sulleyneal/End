@@ -39,6 +39,7 @@ type Sheet = {
   conditions: string[];
   hasPortrait?: boolean;
   hitDiceRemaining?: number;
+  items?: { itemIndex: string; name: string; quantity: number; equipped: boolean }[];
   slots?: { level: number; max: number; used: number }[];
   labels: { race: string; class: string; subrace: string | null };
   derived: {

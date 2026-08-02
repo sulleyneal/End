@@ -15,7 +15,7 @@ import {
   resolveSave,
   sortInitiative,
 } from "@/rules/combat";
-import { canTakeActions, effectiveSpeed } from "@/rules/conditions";
+import { canTakeActions, effectiveSpeed, rangedInMeleeDisadvantage } from "@/rules/conditions";
 import { checkMeleeReach, checkRange, distanceFt, provokesOpportunityAttacks, validatePath } from "@/rules/movement";
 import { selfAreaFt } from "@/rules/spells";
 import type { RollResult } from "@/rules/dice";
@@ -533,12 +533,31 @@ export async function performAttack(params: {
     longRange = range.longRange;
   }
 
+  // Shooting with an enemy breathing down your neck is harder (PHB 195).
+  const adjacentEnemies =
+    attack.kind === "ranged" && actor.x !== null && actor.y !== null
+      ? encounter.combatants.filter(
+          (c) =>
+            c.side !== actor.side &&
+            !c.defeated &&
+            c.x !== null &&
+            c.y !== null &&
+            distanceFt({ x: actor.x!, y: actor.y! }, { x: c.x!, y: c.y! }) <= 5,
+        )
+      : [];
+  const crowded = rangedInMeleeDisadvantage({
+    adjacentEnemies: adjacentEnemies.map((c) => ({
+      conditions: c.conditions,
+      exhaustion: c.exhaustion,
+    })),
+  });
+
   const outcome = resolveAttack({
     attackBonus: attack.attackBonus,
     attacker: { conditions: actor.conditions, exhaustion: actor.exhaustion },
     target: { conditions: target.conditions, exhaustion: target.exhaustion, ac: target.ac },
     rangeFt,
-    situational: { disadvantage: longRange },
+    situational: { disadvantage: longRange || crowded.disadvantage },
   });
 
   let damageRoll: RollResult | null = null;
