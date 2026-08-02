@@ -18,6 +18,7 @@ import {
 import { canTakeActions, effectiveSpeed, rangedInMeleeDisadvantage } from "@/rules/conditions";
 import { checkMeleeReach, checkRange, distanceFt, provokesOpportunityAttacks, validatePath } from "@/rules/movement";
 import { selfAreaFt } from "@/rules/spells";
+import { advanceTurn, resolveTurn } from "@/rules/turn-order";
 import type { RollResult } from "@/rules/dice";
 import { srd } from "@/srd/local";
 import { listCharacters } from "./characters";
@@ -387,30 +388,23 @@ export async function getEncounter(encounterId: string): Promise<EncounterView> 
   // and the journal understated how long a fight ran. Writing the corrected
   // pointer here keeps the invariant that `round` is always the round of the
   // combatant whose turn it is. It self-heals once and then stops writing.
-  const living = view.filter((c) => !c.defeated);
-  let active: string | null = null;
-  let turnIndex = encounter.turnIndex;
-  let round = encounter.round;
+  const pointer =
+    encounter.status === "active"
+      ? resolveTurn(view, encounter.turnIndex, encounter.round)
+      : { activeId: null, turnIndex: encounter.turnIndex, round: encounter.round, moved: false };
 
-  if (encounter.status === "active" && living.length > 0 && view.length > 0) {
-    for (let step = 0; step < view.length; step++) {
-      const index = (encounter.turnIndex + step) % view.length;
-      const candidate = view[index];
-      if (candidate && !candidate.defeated) {
-        active = candidate.id;
-        if (step > 0) {
-          turnIndex = index;
-          // Wrapping the end of the initiative order is a new round.
-          if (index < encounter.turnIndex) round = encounter.round + 1;
-          await db
-            .update(encounters)
-            .set({ turnIndex, round })
-            .where(eq(encounters.id, encounter.id));
-        }
-        break;
-      }
-    }
+  // Committed when it moves, so the stored round is never behind the round
+  // actually being played. See src/rules/turn-order.ts.
+  if (pointer.moved) {
+    await db
+      .update(encounters)
+      .set({ turnIndex: pointer.turnIndex, round: pointer.round })
+      .where(eq(encounters.id, encounter.id));
   }
+
+  const active = pointer.activeId;
+  const turnIndex = pointer.turnIndex;
+  const round = pointer.round;
 
   const [mapRow] = encounter.mapId
     ? await db.select().from(maps).where(eq(maps.id, encounter.mapId)).limit(1)
@@ -797,33 +791,19 @@ export async function endTurn(encounterId: string, combatantId: string): Promise
     .set({ movementUsed: 0, actionUsed: false, bonusUsed: false, reactionUsed: false })
     .where(eq(combatants.id, actor.id));
 
-  const total = encounter.combatants.length;
-  let round = encounter.round;
-
-  // Advance from whoever actually just acted.
-  //
-  // Stepping from the stored turnIndex instead handed the next combatant in
-  // order a second turn with a fresh action economy whenever somebody died on
-  // their own turn — a monster took two attacks in one round. getEncounter
-  // commits the skip past a corpse, so the two are in step again, but advancing
-  // from the actor is the honest expression of what this does.
+  // Advance from whoever actually just acted, not from the stored index — those
+  // differ the moment somebody dies on their own turn, and stepping from the
+  // stale one handed the next combatant a second turn. See src/rules/turn-order.ts.
   const actorIndex = encounter.combatants.findIndex((c) => c.id === actor.id);
-  let nextIndex = actorIndex >= 0 ? actorIndex : encounter.turnIndex;
-
-  // Skip anyone already out of the fight; stop if nobody is left standing.
-  for (let step = 0; step < total; step++) {
-    nextIndex += 1;
-    if (nextIndex >= total) {
-      nextIndex = 0;
-      round += 1;
-    }
-    const next = encounter.combatants[nextIndex];
-    if (next && !next.defeated) break;
-  }
+  const next = advanceTurn(
+    encounter.combatants,
+    actorIndex >= 0 ? actorIndex : encounter.turnIndex,
+    encounter.round,
+  );
 
   await db
     .update(encounters)
-    .set({ turnIndex: nextIndex, round })
+    .set({ turnIndex: next.turnIndex, round: next.round })
     .where(eq(encounters.id, encounterId));
 
   const updated = await getEncounter(encounterId);
