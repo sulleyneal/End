@@ -279,6 +279,17 @@ export const campaignMembers = pgTable(
     role: text("role").$type<MemberRole>().notNull().default("player"),
     /** When this member last opened the table, for the what-you-missed catch-up. */
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    /**
+     * Last heartbeat from an open play screen, for the who-is-here indicator.
+     *
+     * Deliberately not `lastSeenAt`. That column marks how far a member has been
+     * caught up and is what the async catch-up diffs against, so heartbeating it
+     * would silently delete everyone's "while you were away" summary the moment
+     * they opened the page. Presence answers a different question — is anyone
+     * around right now — and needs to move on a timer without touching what a
+     * player has actually read.
+     */
+    lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
     joinedAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.campaignId, t.userId] })],

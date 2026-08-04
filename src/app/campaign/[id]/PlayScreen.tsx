@@ -13,6 +13,8 @@ import { BattleMap } from "@/components/BattleMap";
 import { Journal } from "@/components/Journal";
 import { ChatPanel, type ChatMessage } from "@/components/ChatPanel";
 import { DiceTray } from "@/components/DiceTray";
+import { PresenceList, PresencePill } from "@/components/PresenceList";
+import { usePresence } from "@/lib/usePresence";
 import type { Encounter } from "@/components/combat-types";
 
 type Roll = {
@@ -76,6 +78,13 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
   const [unreadChat, setUnreadChat] = useState(0);
   const bottom = useRef<HTMLDivElement>(null);
   const seen = useRef(new Set<string>());
+  const { members, onlineCount } = usePresence(campaignId);
+
+  // On a wide screen the chat panel is always on show, so a message arriving
+  // there has already been read. On a phone it is one tab among six and only
+  // counts as read while that tab is the one in front of you.
+  const wide = useIsWide();
+  const chatVisible = wide || tab === "chat";
 
   /** Reloads sheets and rolls; cheap enough to run on any state-changing event. */
   const refreshSide = useCallback(async () => {
@@ -151,7 +160,10 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
               createdAt: event.createdAt,
             },
           ]);
-          setUnreadChat((n) => n + 1);
+          // Counted only when the panel is not on screen. Incrementing
+          // unconditionally meant reading chat live still built up a tally,
+          // which then appeared as unread the moment you switched tabs.
+          if (!chatVisible) setUnreadChat((n) => n + 1);
           return;
         }
 
@@ -182,7 +194,7 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
         void refreshSide();
       }
     },
-    [refreshSide],
+    [refreshSide, chatVisible],
   );
 
   const { status } = useEventStream(campaignId, onEvent, { since: state?.cursor });
@@ -248,13 +260,19 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
           <span className="text-[var(--muted)]">
             Code <span className="font-semibold tracking-wider tabular">{state.campaign.joinCode}</span>
           </span>
+          <PresencePill onlineCount={onlineCount} />
           <StreamBadge status={status} />
         </div>
       </header>
 
       {/* Mobile tabs; on wide screens everything is visible at once. Combat only
-          appears while there is an encounter to act in. */}
-      <nav className="mb-3 flex gap-1 lg:hidden">
+          appears while there is an encounter to act in.
+
+          Sticky, because the page scrolls as a whole: read a few paragraphs of
+          story on a phone and the bar — along with the unread-chat badge on it
+          — scrolled off the top, so the one indicator telling you somebody had
+          spoken was only visible if you happened to already be at the top. */}
+      <nav className="sticky top-0 z-20 -mx-4 mb-3 flex gap-1 border-b border-[var(--border)] bg-[var(--background)] px-4 py-2 lg:hidden">
         {(state.encounter
           ? (["story", "combat", "chat", "party", "dice", "journal"] as const)
           : (["story", "chat", "party", "dice", "journal"] as const)
@@ -272,7 +290,7 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
             }`}
           >
             {t}
-            {t === "chat" && unreadChat > 0 && tab !== "chat" && (
+            {t === "chat" && unreadChat > 0 && !chatVisible && (
               <span
                 data-testid="chat-unread"
                 className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-[var(--danger)] px-1 text-[10px] font-semibold text-white"
@@ -402,6 +420,9 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
               meId={state.me.id}
               onChanged={() => void refreshSide()}
             />
+            <div className="mt-4">
+              <PresenceList members={members} />
+            </div>
           </div>
           <div
             className={
@@ -432,6 +453,29 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
       </div>
     </main>
   );
+}
+
+/**
+ * Whether the layout is at its wide breakpoint, where every panel is on screen
+ * at once and the tab bar is hidden. Matches Tailwind's `lg`.
+ *
+ * Starts false rather than reading the width during render: the server has no
+ * window, so an initial `true` on a desktop would disagree with the server's
+ * markup and trip a hydration mismatch. One extra render on wide screens is the
+ * cheaper trade.
+ */
+function useIsWide(): boolean {
+  const [wide, setWide] = useState(false);
+
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setWide(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+
+  return wide;
 }
 
 function StreamBadge({ status }: { status: string }) {

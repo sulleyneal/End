@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { requireMembership } from "@/server/auth";
 import { currentSeq, eventsSince } from "@/server/events";
+import { touchPresence } from "@/server/presence";
 import { route } from "@/server/http";
 
 /**
@@ -26,11 +27,19 @@ const POLL_MS = 700;
 const HEARTBEAT_MS = 15_000;
 /** Recycle the connection well inside serverless limits; EventSource reconnects with its cursor. */
 const MAX_LIFETIME_MS = 4 * 60 * 1000;
+/**
+ * How often an open stream vouches for its viewer being present.
+ *
+ * Well inside `ONLINE_MS`, so a beat can be missed entirely without anyone
+ * blinking offline, and rare enough that it adds one small write per viewer per
+ * half minute rather than one per 700ms poll.
+ */
+const PRESENCE_MS = 30_000;
 
 export const GET = route(
   async (request: NextRequest, ctx: RouteContext<"/api/campaigns/[id]/stream">) => {
     const { id } = await ctx.params;
-    await requireMembership(id);
+    const { user } = await requireMembership(id);
 
     const sinceParam = request.nextUrl.searchParams.get("since");
     // `since` omitted means "only what happens from now on".
@@ -72,9 +81,25 @@ export const GET = route(
         send(`event: cursor\ndata: ${JSON.stringify({ seq: cursor })}\n\n`);
 
         let lastBeat = Date.now();
+        let lastPresence = 0;
+
+        // Vouch for the viewer immediately, so opening the table lights them up
+        // for everyone else rather than after the first interval elapses.
+        const beatPresence = async () => {
+          lastPresence = Date.now();
+          try {
+            await touchPresence(id, user.id);
+          } catch (error) {
+            // Presence is a nicety; never let it kill a live game feed.
+            console.error("Presence heartbeat failed:", error);
+          }
+        };
+        await beatPresence();
 
         const tick = async () => {
           if (closed) return;
+
+          if (Date.now() - lastPresence >= PRESENCE_MS) await beatPresence();
 
           try {
             const batch = await eventsSince(id, cursor);

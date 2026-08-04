@@ -12,7 +12,8 @@
     "test:e2e": "node tests/e2e/play.mjs",
     "db:push": "drizzle-kit push --force",
     "db:seed": "tsx scripts/seed-srd.ts",
-    "db:reset": "tsx scripts/reset-db.ts"
+    "db:reset": "tsx scripts/reset-db.ts",
+    "dev:sandbox": "NODE_OPTIONS='--import ./scripts/sandbox-proxy.mjs' next dev"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
