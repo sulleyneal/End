@@ -11,6 +11,14 @@ export const metadata: Metadata = {
   description: "A multiplayer D&D 5e table with an AI DM. The app is the referee.",
   // The manifest is what lets iOS add this to the Home Screen, which is in turn
   // the only way Safari will deliver a push notification.
+  //
+  // The Home Screen icon itself does *not* come from the manifest — Safari
+  // ignores `icons` there and reads `apple-touch-icon`, falling back to a
+  // screenshot of the page when it is missing. That tag comes from
+  // `app/apple-icon.png`, and `app/icon.png` and `app/favicon.ico` cover the
+  // tab, so there is nothing to declare here; setting `icons` would override
+  // the file convention rather than add to it. Re-render all of them with
+  // `node scripts/make-icons.mjs`.
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "The Table", statusBarStyle: "default" },
 };
