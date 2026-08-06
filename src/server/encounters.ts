@@ -23,6 +23,7 @@ import type { RollResult } from "@/rules/dice";
 import { srd } from "@/srd/local";
 import { listCharacters } from "./characters";
 import { appendEvent, postMessage } from "./events";
+import { notify } from "./notify";
 import { NotFoundError, RuleError } from "./http";
 import { type CombatStats, monsterArmorClass, monsterCombatStats, monsterHitPoints } from "./monsters";
 import { type CastReport, castSpell, knownSpells, slotsFor } from "./casting";
@@ -807,12 +808,33 @@ export async function endTurn(encounterId: string, combatantId: string): Promise
     .where(eq(encounters.id, encounterId));
 
   const updated = await getEncounter(encounterId);
+  const nowActive = updated.combatants.find((c) => c.id === updated.activeCombatantId);
   await appendEvent(encounter.campaignId, "turn.changed", {
     encounterId,
     round: updated.round,
     activeCombatantId: updated.activeCombatantId,
-    activeName: updated.combatants.find((c) => c.id === updated.activeCombatantId)?.name ?? null,
+    activeName: nowActive?.name ?? null,
   });
+
+  // Tell whoever is up, if they are not already watching. `notify` swallows its
+  // own failures — a turn must still end when a webhook is dead.
+  if (nowActive?.characterId) {
+    const [sheet] = await db
+      .select({ userId: characters.userId })
+      .from(characters)
+      .where(eq(characters.id, nowActive.characterId))
+      .limit(1);
+
+    if (sheet?.userId) {
+      await notify({
+        campaignId: encounter.campaignId,
+        reason: "turn",
+        targetUserIds: [sheet.userId],
+        title: "Your turn",
+        body: `${nowActive.name} is up — round ${updated.round}.`,
+      });
+    }
+  }
 
   return maybeEndEncounter(updated);
 }

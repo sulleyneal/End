@@ -14,6 +14,8 @@ import { Journal } from "@/components/Journal";
 import { ChatPanel, type ChatMessage } from "@/components/ChatPanel";
 import { DiceTray } from "@/components/DiceTray";
 import { PresenceList, PresencePill } from "@/components/PresenceList";
+import { NotifyPanel } from "@/components/NotifyPanel";
+import { PingButton } from "@/components/PingButton";
 import { usePresence } from "@/lib/usePresence";
 import type { Encounter } from "@/components/combat-types";
 
@@ -422,6 +424,12 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
             />
             <div className="mt-4">
               <PresenceList members={members} />
+            </div>
+            <div className="mt-4">
+              <PingButton campaignId={campaignId} />
+            </div>
+            <div className="mt-4">
+              <NotifyPanel campaignId={campaignId} />
             </div>
           </div>
           <div

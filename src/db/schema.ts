@@ -290,9 +290,52 @@ export const campaignMembers = pgTable(
      * player has actually read.
      */
     lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
+    /**
+     * Discord snowflake, so a notification can name the person it is for.
+     * Without it a webhook can only shout at the channel.
+     */
+    discordUserId: text("discord_user_id"),
+    /**
+     * Which events are worth interrupting this member for.
+     *
+     * Turn and DM default on because they are the whole point of play-by-post —
+     * nobody refreshes a tab for three days on the off chance. Chat defaults off
+     * because a table talking amongst itself would ping everyone constantly, and
+     * a notification channel that cries wolf gets muted, taking the useful ones
+     * with it.
+     */
+    notifyOnTurn: boolean("notify_on_turn").notNull().default(true),
+    notifyOnDm: boolean("notify_on_dm").notNull().default(true),
+    notifyOnChat: boolean("notify_on_chat").notNull().default(false),
+    notifyOnPing: boolean("notify_on_ping").notNull().default(true),
+    /** Rate-limit anchor for manual pings, so "poke" cannot become a hammer. */
+    lastPingedAt: timestamp("last_pinged_at", { withTimezone: true }),
     joinedAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.campaignId, t.userId] })],
+);
+
+/**
+ * Browser push endpoints, one row per device.
+ *
+ * Keyed by endpoint rather than user: the same person on a phone and a laptop
+ * is two subscriptions and both should ring. Endpoints also expire on their
+ * own, so this table is expected to shed rows — a 404 or 410 from the push
+ * service means "delete this", not "retry".
+ */
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("push_subscriptions_endpoint_idx").on(t.endpoint)],
 );
 
 export const campaignSettings = pgTable("campaign_settings", {
@@ -305,6 +348,14 @@ export const campaignSettings = pgTable("campaign_settings", {
   /** "standard" = 5 ft per diagonal; "variant" = alternating 5/10. */
   diagonalMovement: text("diagonal_movement").notNull().default("standard"),
   encumbrance: boolean("encumbrance").notNull().default(false),
+  /**
+   * Discord incoming-webhook URL for this table.
+   *
+   * A secret in the sense that anyone holding it can post to the channel, so it
+   * is never returned to a client — routes report whether one is configured,
+   * never what it is.
+   */
+  discordWebhookUrl: text("discord_webhook_url"),
 });
 
 /* ------------------------------------------------------------------ *

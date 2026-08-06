@@ -9,6 +9,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "AI Dungeon Master",
   description: "A multiplayer D&D 5e table with an AI DM. The app is the referee.",
+  // The manifest is what lets iOS add this to the Home Screen, which is in turn
+  // the only way Safari will deliver a push notification.
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "The Table", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
