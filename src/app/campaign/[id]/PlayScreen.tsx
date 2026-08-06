@@ -17,6 +17,7 @@ import { PresenceList, PresencePill } from "@/components/PresenceList";
 import { NotifyPanel } from "@/components/NotifyPanel";
 import { PingButton } from "@/components/PingButton";
 import { usePresence } from "@/lib/usePresence";
+import { useStickToBottom } from "@/lib/useStickToBottom";
 import type { Encounter } from "@/components/combat-types";
 
 type Roll = {
@@ -78,7 +79,7 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
   const [tray, setTray] = useState<Roll | null>(null);
   const [missed, setMissed] = useState<{ summary: string; count: number } | null>(null);
   const [unreadChat, setUnreadChat] = useState(0);
-  const bottom = useRef<HTMLDivElement>(null);
+  const { ref: storyLog, onScroll: onStoryScroll } = useStickToBottom<HTMLDivElement>();
   const seen = useRef(new Set<string>());
   const { members, onlineCount } = usePresence(campaignId);
 
@@ -200,10 +201,6 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
   );
 
   const { status } = useEventStream(campaignId, onEvent, { since: state?.cursor });
-
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth" });
-  }, [entries.length, thinking]);
 
   const submit = async () => {
     const text = action.trim();
@@ -349,6 +346,8 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
           )}
           <div
             data-testid="story-log"
+            ref={storyLog}
+            onScroll={onStoryScroll}
             className="flex-1 space-y-3 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"
           >
             {entries.length === 0 && (
@@ -362,7 +361,6 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
             {thinking && (
               <p className="animate-pulse text-sm text-[var(--muted)]">The DM is thinking…</p>
             )}
-            <div ref={bottom} />
           </div>
 
           <div className="mt-3">

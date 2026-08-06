@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { api } from "@/lib/api";
 import { ErrorNote, inputClass } from "@/components/ui";
+import { useStickToBottom } from "@/lib/useStickToBottom";
 
 /**
  * Table chat — what the players say to each other, not to the world.
@@ -37,11 +38,7 @@ export function ChatPanel({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const bottom = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+  const { ref: chatLog, onScroll: onChatScroll } = useStickToBottom<HTMLDivElement>();
 
   const send = async () => {
     const content = draft.trim();
@@ -78,6 +75,8 @@ export function ChatPanel({
 
       <div
         data-testid="chat-log"
+        ref={chatLog}
+        onScroll={onChatScroll}
         className="max-h-80 min-h-32 flex-1 space-y-2 overflow-y-auto p-3 lg:max-h-96"
       >
         {messages.length === 0 && (
@@ -100,7 +99,6 @@ export function ChatPanel({
             </div>
           );
         })}
-        <div ref={bottom} />
       </div>
 
       <form
