@@ -57,7 +57,11 @@ export const GET = route(async (_req: Request, ctx: RouteContext<"/api/campaigns
   // Marked seen only once the summary exists. Marking first meant a failed AI
   // call, or a second tab racing the first, consumed the catch-up and lost it.
   const summary = await summariseMissed(
-    narrative.map((m) => `${m.authorName} (${m.kind}): ${m.content}`),
+    narrative.map((m) => ({
+      authorName: m.authorName,
+      kind: m.kind,
+      content: m.content,
+    })),
   );
   await markSeen();
 

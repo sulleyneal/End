@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { combatants, encounters, messages, rolls, sessionLogs } from "@/db/schema";
 import { appendEvent, postMessage } from "@/server/events";
 import { PARSER_MODEL, anthropic } from "./client";
+import { type LogEntry, renderEntries, splitPendingPrompt } from "./catchup-log";
 
 /**
  * Session recaps and the campaign journal.
@@ -250,28 +251,75 @@ export async function listJournal(campaignId: string) {
   }));
 }
 
+const CATCHUP_PROMPT = `You catch a player up on what happened at their D&D table
+while they were away.
+
+Three or four sentences. Past tense, plain and specific. No dice results, no hit
+points, no statistics.
+
+What counts as having happened:
+
+- A line labelled (action) is a player stating what their character does. Those
+  are the only lines that establish a character's choices.
+- A line from the Dungeon Master describes the consequences of those choices, or
+  what the world does. Those happened too.
+- A line labelled (dialogue) is something that creature actually said.
+
+What does NOT count, and is the single most important rule here:
+
+- When the Dungeon Master offers the party options — "you could knock, or ask him
+  what he means" — those options are possibilities, not events. A character who
+  was merely offered the chance to say something did not say it.
+- You will be given a PENDING section holding a question the party has not
+  answered yet. Nothing in it has happened. Do not report any of it as an event,
+  and never invent the answer.
+
+Close by saying where the party is now and what is waiting on them. If the
+PENDING section is present, that is what is waiting on them — say so plainly,
+and make clear nobody has answered it yet.
+
+When the log is thin, write less. A short accurate catch-up is worth more than a
+full-looking invented one.
+
+Format: plain prose only. No heading, no title, no restating the question back.
+No markdown — no asterisks, no bold, no bullets. It is rendered as plain text
+under a heading that already says "While you were away", so anything of that
+sort appears to the player as clutter or as literal asterisks.`;
+
 /**
  * A short catch-up for a player who has been away.
  *
- * Separate from the session recap: this is not a journal entry, it is the two
+ * Separate from the session recap: this is not a journal entry, it is the few
  * sentences someone needs before they can take their turn. Runs on the cheap
  * model — it is summarisation, not invention.
+ *
+ * The unanswered prompt at the end of a log is split out rather than left
+ * inline. Inline, the DM's offered options were coming back as completed
+ * actions: a returning player was told a character had asked a question he had
+ * only been offered the chance to ask, and that the NPC had answered it.
  */
-export async function summariseMissed(lines: string[]): Promise<string | null> {
-  if (lines.length === 0) return null;
+export async function summariseMissed(entries: LogEntry[]): Promise<string | null> {
+  if (entries.length === 0) return null;
+
+  const { events, pending } = splitPendingPrompt(entries);
+
+  // Nothing but an unanswered question means nothing has happened to report.
+  if (events.length === 0) return null;
 
   const response = await anthropic().messages.create({
     model: PARSER_MODEL,
     max_tokens: 400,
-    system:
-      "You catch a player up on what happened at their D&D table while they were away. " +
-      "Two or three sentences, past tense, plain and specific. Only what is in the log — " +
-      "if it is not there, it did not happen. No dice results, no hit points, no statistics. " +
-      "End with where the party is now and what is in front of them.",
+    system: CATCHUP_PROMPT,
     messages: [
       {
         role: "user",
-        content: `While they were away:\n\n${lines.join("\n\n").slice(0, 30000)}`,
+        content: [
+          `TABLE LOG — everything below happened:\n\n${renderEntries(events).slice(0, 30000)}`,
+          pending.length > 0
+            ? `\n\nPENDING — the table has been asked this and has NOT answered. ` +
+              `None of it has happened:\n${renderEntries(pending).slice(0, 4000)}`
+            : "",
+        ].join(""),
       },
     ],
   });
