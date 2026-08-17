@@ -16,6 +16,7 @@ import { DiceTray } from "@/components/DiceTray";
 import { PresenceList, PresencePill } from "@/components/PresenceList";
 import { NotifyPanel } from "@/components/NotifyPanel";
 import { PingButton } from "@/components/PingButton";
+import { SpellsPanel, type SheetSpell } from "@/components/SpellsPanel";
 import { usePresence } from "@/lib/usePresence";
 import { useStickToBottom } from "@/lib/useStickToBottom";
 import type { Encounter } from "@/components/combat-types";
@@ -46,12 +47,14 @@ type Sheet = {
   hitDiceRemaining?: number;
   items?: { itemIndex: string; name: string; quantity: number; equipped: boolean }[];
   slots?: { level: number; max: number; used: number }[];
+  spells?: SheetSpell[];
   labels: { race: string; class: string; subrace: string | null };
   derived: {
     armorClass: { value: number };
     initiative: number;
     speed: { effective: number };
     passive: { perception: number };
+    spellcasting?: { saveDc: number; attackBonus: number; ability: string } | null;
   };
 };
 
@@ -420,6 +423,15 @@ export default function PlayScreen({ campaignId }: { campaignId: string }) {
               meId={state.me.id}
               onChanged={() => void refreshSide()}
             />
+            {myCharacter?.derived.spellcasting && (
+              <div className="mt-4">
+                <SpellsPanel
+                  spells={myCharacter.spells ?? []}
+                  slots={myCharacter.slots ?? []}
+                  spellcasting={myCharacter.derived.spellcasting}
+                />
+              </div>
+            )}
             <div className="mt-4">
               <PresenceList members={members} />
             </div>

@@ -52,7 +52,25 @@ export type CharacterSheet = {
   hasPortrait: boolean;
   labels: { race: string; class: string; subrace: string | null };
   slots: { level: number; max: number; used: number }[];
-  spells: { spellIndex: string; prepared: boolean; alwaysPrepared: boolean }[];
+  /**
+   * Resolved from the SRD here rather than left as bare indexes, matching how
+   * `labels` works: a client showing a spell list should never have to know what
+   * "fire-bolt" means, and the sheet is the one place that mapping belongs.
+   */
+  spells: {
+    spellIndex: string;
+    prepared: boolean;
+    alwaysPrepared: boolean;
+    name: string;
+    level: number;
+    school: string | null;
+    castingTime: string | null;
+    range: string | null;
+    duration: string | null;
+    concentration: boolean;
+    ritual: boolean;
+    description: string | null;
+  }[];
   items: { itemIndex: string; name: string; quantity: number; equipped: boolean; attuned: boolean }[];
   proficiencies: { kind: string; proficiencyIndex: string; expertise: boolean }[];
   derived: DerivedCharacter;
@@ -288,11 +306,27 @@ export async function getCharacterSheet(characterId: string): Promise<CharacterS
     slots: slotRows
       .map((s) => ({ level: s.level, max: s.max, used: s.used }))
       .sort((a, b) => a.level - b.level),
-    spells: spellRows.map((s) => ({
-      spellIndex: s.spellIndex,
-      prepared: s.prepared,
-      alwaysPrepared: s.alwaysPrepared,
-    })),
+    spells: spellRows
+      .map((s) => {
+        const doc = srd.spells().find((d) => d.index === s.spellIndex);
+        return {
+          spellIndex: s.spellIndex,
+          prepared: s.prepared,
+          alwaysPrepared: s.alwaysPrepared,
+          // A spell the SRD does not know is still shown, under its index, so a
+          // data gap reads as a missing name rather than a vanished spell.
+          name: doc?.name ?? s.spellIndex,
+          level: doc?.level ?? 0,
+          school: doc?.school?.name ?? null,
+          castingTime: doc?.casting_time ?? null,
+          range: doc?.range ?? null,
+          duration: doc?.duration ?? null,
+          concentration: doc?.concentration ?? false,
+          ritual: doc?.ritual ?? false,
+          description: doc?.desc?.join("\n\n") ?? null,
+        };
+      })
+      .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)),
     items: items.map((i) => ({
       itemIndex: i.itemIndex,
       name: i.doc.name,

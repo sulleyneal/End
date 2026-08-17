@@ -1,5 +1,5 @@
 import { requireMembership } from "@/server/auth";
-import { listPresence } from "@/server/presence";
+import { listPresence, touchPresence } from "@/server/presence";
 import { route } from "@/server/http";
 
 /**
@@ -17,7 +17,14 @@ export const dynamic = "force-dynamic";
 export const GET = route(
   async (_req: Request, ctx: RouteContext<"/api/campaigns/[id]/presence">) => {
     const { id } = await ctx.params;
-    await requireMembership(id);
+    const { user } = await requireMembership(id);
+
+    // Asking who is here is itself proof of being here. Without this, the first
+    // poll on page load races the stream's opening heartbeat and loses: a player
+    // who had just opened the table was shown "Nobody here" and listed as "not
+    // yet joined" — for up to a full poll interval, about themselves.
+    await touchPresence(id, user.id);
+
     return Response.json({ members: await listPresence(id) });
   },
 );
